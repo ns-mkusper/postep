@@ -1,0 +1,22 @@
+[package]
+name = "org_domain"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+orgize = { workspace = true }
+parking_lot = { workspace = true }
+notify = { workspace = true }
+walkdir = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+org_roam = { path = "../org_roam" }

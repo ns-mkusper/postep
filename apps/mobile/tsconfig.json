@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": "./",
+    "jsx": "react-jsx",
+    "paths": {
+      "@postep/bridge": ["../..//packages/bridge/src"]
+    }
+  },
+  "include": ["app", "components", "hooks", "store", "expo-env.d.ts"]
+}

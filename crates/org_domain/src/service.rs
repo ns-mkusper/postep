@@ -1,11 +1,13 @@
-use std::collections::{HashMap, HashSet};
-use std::fs;
+use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
 use crate::{
@@ -13,30 +15,31 @@ use crate::{
     document::OrgDocument,
     habit,
     notifications::{NotificationRequest, NotificationSink},
+    slate,
 };
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgendaSnapshot {
+    pub items: Vec<agenda::AgendaItem>,
+    pub habits: Vec<habit::Habit>,
+}
+
 pub struct OrgService {
-    document_roots: Vec<PathBuf>,
-    agenda_roots: Vec<PathBuf>,
-    habit_roots: Vec<PathBuf>,
+    roots: Vec<PathBuf>,
     documents: RwLock<HashMap<PathBuf, OrgDocument>>,
     watcher: Option<RecommendedWatcher>,
     notification_sink: Option<Box<dyn NotificationSink>>,
 }
 
 pub struct OrgServiceBuilder {
-    document_roots: Vec<PathBuf>,
-    agenda_roots: Vec<PathBuf>,
-    habit_roots: Vec<PathBuf>,
+    roots: Vec<PathBuf>,
     notification_sink: Option<Box<dyn NotificationSink>>,
 }
 
 impl OrgServiceBuilder {
     pub fn new() -> Self {
         Self {
-            document_roots: Vec::new(),
-            agenda_roots: Vec::new(),
-            habit_roots: Vec::new(),
+            roots: Vec::new(),
             notification_sink: None,
         }
     }
@@ -46,17 +49,7 @@ impl OrgServiceBuilder {
     }
 
     pub fn add_document_root(mut self, path: impl AsRef<Path>) -> Self {
-        Self::push_unique(&mut self.document_roots, path.as_ref().to_path_buf());
-        self
-    }
-
-    pub fn add_agenda_root(mut self, path: impl AsRef<Path>) -> Self {
-        Self::push_unique(&mut self.agenda_roots, path.as_ref().to_path_buf());
-        self
-    }
-
-    pub fn add_habit_root(mut self, path: impl AsRef<Path>) -> Self {
-        Self::push_unique(&mut self.habit_roots, path.as_ref().to_path_buf());
+        Self::push_unique(&mut self.roots, path.as_ref().to_path_buf());
         self
     }
 
@@ -67,9 +60,7 @@ impl OrgServiceBuilder {
 
     pub fn build(self) -> Result<OrgService> {
         let mut service = OrgService {
-            document_roots: self.document_roots,
-            agenda_roots: self.agenda_roots,
-            habit_roots: self.habit_roots,
+            roots: self.roots,
             documents: RwLock::new(HashMap::new()),
             watcher: None,
             notification_sink: self.notification_sink,
@@ -90,49 +81,17 @@ impl OrgService {
         OrgServiceBuilder::new()
     }
 
-    pub fn document_roots(&self) -> Vec<PathBuf> {
-        self.document_roots.clone()
-    }
-
-    pub fn agenda_roots(&self) -> Vec<PathBuf> {
-        self.agenda_roots.clone()
-    }
-
-    pub fn habit_roots(&self) -> Vec<PathBuf> {
-        self.habit_roots.clone()
+    pub fn roots(&self) -> Vec<PathBuf> {
+        let mut roots = self.roots.clone();
+        roots.sort();
+        roots
     }
 
     pub fn add_document_root(&mut self, path: PathBuf) -> Result<()> {
-        if self.document_roots.contains(&path) {
+        if self.roots.contains(&path) {
             return Ok(());
         }
-        self.document_roots.push(path.clone());
-        {
-            let mut docs = self.documents.write();
-            self.ingest_root(&mut docs, &path)?;
-        }
-        self.watch_path(&path)?;
-        Ok(())
-    }
-
-    pub fn add_agenda_root(&mut self, path: PathBuf) -> Result<()> {
-        if self.agenda_roots.contains(&path) {
-            return Ok(());
-        }
-        self.agenda_roots.push(path.clone());
-        {
-            let mut docs = self.documents.write();
-            self.ingest_root(&mut docs, &path)?;
-        }
-        self.watch_path(&path)?;
-        Ok(())
-    }
-
-    pub fn add_habit_root(&mut self, path: PathBuf) -> Result<()> {
-        if self.habit_roots.contains(&path) {
-            return Ok(());
-        }
-        self.habit_roots.push(path.clone());
+        self.roots.push(path.clone());
         {
             let mut docs = self.documents.write();
             self.ingest_root(&mut docs, &path)?;
@@ -154,7 +113,7 @@ impl OrgService {
         let docs = self.documents.read();
         let mut entries: Vec<PathBuf> = docs
             .keys()
-            .filter(|path| Self::path_in_roots(path, &self.document_roots))
+            .filter(|path| Self::path_in_roots(path, &self.roots))
             .cloned()
             .collect();
         entries.sort();
@@ -200,7 +159,7 @@ impl OrgService {
         let docs_lock = self.documents.read();
         let docs: Vec<OrgDocument> = docs_lock
             .iter()
-            .filter(|(path, _)| Self::path_in_roots(path, &self.habit_roots))
+            .filter(|(path, _)| Self::path_in_roots(path, &self.roots))
             .map(|(_, doc)| doc.clone())
             .collect();
         let mut habits_all = Vec::new();
@@ -212,14 +171,157 @@ impl OrgService {
 
     pub fn agenda(&self) -> Result<Vec<agenda::AgendaItem>> {
         let docs_lock = self.documents.read();
-        let docs: Vec<OrgDocument> = docs_lock
+        let docs: Vec<(PathBuf, OrgDocument)> = docs_lock
             .iter()
-            .filter(|(path, _)| Self::path_in_roots(path, &self.agenda_roots))
-            .map(|(_, doc)| doc.clone())
+            .filter(|(path, _)| Self::path_in_roots(path, &self.roots))
+            .map(|(path, doc)| (path.clone(), doc.clone()))
             .collect();
         Ok(agenda::build_agenda(&docs))
     }
 
+    pub fn complete_agenda_item(&self, item: &agenda::AgendaItem) -> Result<()> {
+        let doc = self.get_document(&item.path)?;
+        let mut lines: Vec<String> = doc.raw().lines().map(|l| l.to_string()).collect();
+        let idx = item.headline_line;
+        let line = lines
+            .get_mut(idx)
+            .ok_or_else(|| anyhow!("unable to locate agenda headline"))?;
+
+        let trimmed = line.trim_start_matches('*');
+        let leading_len = line.len() - trimmed.len();
+        let prefix = &line[..leading_len];
+        let rest = trimmed.trim_start();
+
+        let mut new_rest = if rest.starts_with("DONE") {
+            rest.to_string()
+        } else if rest.starts_with("TODO") {
+            rest.replacen("TODO", "DONE", 1)
+        } else if let Some(keyword) = &item.todo_keyword {
+            rest.replacen(keyword, "DONE", 1)
+        } else {
+            format!("DONE {}", rest)
+        };
+
+        if !new_rest.starts_with("DONE") {
+            new_rest = format!("DONE {}", new_rest.trim_start());
+        }
+
+        *line = format!("{}{}", prefix, new_rest);
+        let new_contents = lines.join(
+            "
+",
+        );
+        self.update_document(&item.path, new_contents)?;
+        Ok(())
+    }
+
+    pub fn complete_headline(&self, path: impl AsRef<Path>, headline_line: usize) -> Result<()> {
+        let target = path.as_ref().to_path_buf();
+        let agenda_items = self.agenda()?;
+        let Some(item) = agenda_items
+            .into_iter()
+            .find(|candidate| candidate.path == target && candidate.headline_line == headline_line)
+        else {
+            return Err(anyhow!(
+                "unable to locate agenda headline at {}:{}",
+                target.display(),
+                headline_line
+            ));
+        };
+        self.complete_agenda_item(&item)
+    }
+
+    pub fn agenda_snapshot(&self) -> Result<AgendaSnapshot> {
+        Ok(AgendaSnapshot {
+            items: self.agenda()?,
+            habits: self.habits()?,
+        })
+    }
+
+    pub fn append_to_document(&self, path: impl AsRef<Path>, content: &str) -> Result<()> {
+        let path_buf = path.as_ref().to_path_buf();
+        if let Some(parent) = path_buf.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path_buf)?;
+        let mut payload = content.to_string();
+        if !payload.ends_with('\n') {
+            payload.push('\n');
+        }
+        file.write_all(payload.as_bytes())?;
+
+        let refreshed = OrgDocument::load(&path_buf)?;
+        let mut docs = self.documents.write();
+        docs.insert(path_buf, refreshed);
+        Ok(())
+    }
+
+    pub fn set_headline_status(
+        &self,
+        path: impl AsRef<Path>,
+        headline_line: usize,
+        status: &str,
+    ) -> Result<()> {
+        let doc = self.get_document(&path)?;
+        let mut lines: Vec<String> = doc.raw().lines().map(|l| l.to_string()).collect();
+        let line = lines
+            .get_mut(headline_line)
+            .ok_or_else(|| anyhow!("unable to locate headline"))?;
+
+        let trimmed = line.trim_start_matches('*');
+        let leading_len = line.len() - trimmed.len();
+        let prefix = &line[..leading_len];
+        let rest = trimmed.trim_start();
+
+        let mut parts = rest.splitn(2, ' ');
+        let first = parts.next().unwrap_or("");
+        let remainder = parts.next().unwrap_or("");
+        let new_rest = if first.eq_ignore_ascii_case(status) {
+            rest.to_string()
+        } else {
+            let tail = remainder.trim_start();
+            if tail.is_empty() {
+                status.trim().to_string()
+            } else {
+                format!("{} {}", status.trim(), tail)
+            }
+        };
+
+        *line = format!("{}{}", prefix, new_rest);
+        let new_contents = lines.join("\n");
+        self.update_document(path, new_contents)?;
+        Ok(())
+    }
+
+    pub fn slate_nodes(&self, path: impl AsRef<Path>) -> Result<Vec<slate::SlateNode>> {
+        let doc = self.get_document(path)?;
+        Ok(slate::document_to_slate(&doc))
+    }
+
+    pub fn add_agenda_entry(
+        &self,
+        target: impl AsRef<Path>,
+        title: &str,
+        date: NaiveDate,
+    ) -> Result<()> {
+        let target_path = target.as_ref();
+        let doc = self.get_document(target_path)?;
+        let mut contents = doc.raw().to_string();
+        if !contents.is_empty() && !contents.ends_with('\n') {
+            contents.push('\n');
+        }
+        contents.push_str(&format!(
+            "* TODO {}\nSCHEDULED: <{}>\n\n",
+            title,
+            date.format("%Y-%m-%d")
+        ));
+        self.update_document(target_path, contents)
+    }
     pub fn watch(&mut self) -> Result<()> {
         if self.watcher.is_some() {
             return Ok(());
@@ -256,16 +358,7 @@ impl OrgService {
     }
 
     fn unique_roots(&self) -> Vec<PathBuf> {
-        let mut set: HashSet<PathBuf> = HashSet::new();
-        for root in self
-            .document_roots
-            .iter()
-            .chain(self.agenda_roots.iter())
-            .chain(self.habit_roots.iter())
-        {
-            set.insert(root.clone());
-        }
-        set.into_iter().collect()
+        self.roots.clone()
     }
 
     fn ingest_root(&self, docs: &mut HashMap<PathBuf, OrgDocument>, path: &Path) -> Result<()> {

@@ -1,69 +1,55 @@
 # Postep
 
-Postep is a work-in-progress Org mode viewer and editor targeting Android, iOS, and desktop platforms. The project pairs a Rust core that understands `.org` files with an `egui` front-end designed to deliver Emacs-like rendering, agenda views, and habit tracking on mobile devices.
+Postep is a self-improvement companion that treats your Emacs Org directories as the source of truth while delivering a touch-first Slate interface on Android and other platforms. It combines a high-performance Rust core with a React Native (Expo) surface so agenda planning, habit tracking, and org-roam knowledge work stay in sync across devices.
 
-## Crate Layout
-- `crates/org_core`: Core domain logic for Org documents, habit extraction, agenda generation, and filesystem watching.
-- `crates/org_app`: `eframe`/`egui` application shell that hosts the UI on desktop and mobile. This crate compiles to a native binary for desktop and a `cdylib` (`liborg_app.so`) for Android.
+## Pillars
+- **Org-first database**: Point Postep at any Org directory (local, Google Drive, or both) and it mirrors the files without converting them to a proprietary format.
+- **Agenda focus**: Render the full Org agenda, including scheduled items, deadlines, and backlog triage, with inline actions to capture, complete, or reschedule tasks.
+- **Habit coaching**: Surface Org habit streaks, punch cards, and trendlines so daily routines stay on track.
+- **Calendar integration**: Map Org timestamps to Google Calendar for reminders and availability overlays while keeping Org as the canonical store.
+- **Org-roam graph**: Explore backlinks, tags, and daily notes from your roam vault to support long-term self-improvement ecosystems.
 
-## Getting Started (Desktop Prototype)
-The desktop build is the quickest way to iterate on UI changes before packaging mobile binaries.
+## Architecture Snapshot
+The detailed architecture blueprint lives in [`docs/architecture.md`](docs/architecture.md) with the orgro-inspired Slate UX in [`docs/ui-redesign.md`](docs/ui-redesign.md). At a glance, the stack looks like this:
 
-```bash
-cargo run -p org_app
+1. **Rust core crates** (`crates/`): Parse Org files, generate agendas, compute habit metrics, sync storage providers, and build org-roam graphs. The crates compile both to native binaries (for tooling) and `cdylib` targets that feed the UI.
+2. **TypeScript bridge** (`packages/bridge`, WIP): A `napi-rs` layer that exposes the Rust services to the Slate UI with declarative hooks (`useAgendaQuery`, `useHabitSignals`, `useOrgRoamGraph`, etc.).
+3. **Slate UI** (`apps/mobile`, WIP): An Expo (React Native) application using the DOM runtime so Slate renders natively on Android. Screens include Agenda, Habits, Org-roam, and a full Org editor.
+
+## Current Repo Layout
+This repository is in the middle of migrating from an `egui` prototype to the Slate architecture. The existing crates remain buildable while the new UI and bridge are being staged.
+
+```
+crates/
+  org_core        # Legacy core logic slated to become org_domain + companions
+  org_app         # Legacy egui shell kept for desktop testing during migration
+docs/
+  architecture.md # New architecture blueprint
+  android-storage.md # SAF + Google Drive onboarding prototype
+mobile/
+  android         # NativeActivity wrapper – will be superseded by Expo Android packaging
+orgro/
+  ...             # Reference sources cloned from the Orgro project
 ```
 
-Optional environment variables:
-- `ORG_ROOT`: Set to a directory that contains Org files. When unset, the app starts with an empty library.
-- `ORG_ROOTS`, `ORG_AGENDA_ROOTS`, `ORG_HABIT_ROOTS`: OS-specific path lists (e.g., `:` on macOS/Linux, `;` on Windows) that pre-populate the document, agenda, and habit directories.
+## Getting Started (Migration Phase)
+1. **Rust toolchain**: `rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android`
+2. **Node/Expo toolchain** (coming soon): `pnpm install` inside `apps/mobile` once the bridge lands.
+3. **Desktop prototype**: `cargo run -p org_app` still launches the legacy egui app for testing Org parsing changes.
+4. **Android smoke build**: follow `mobile/android/README` while the Expo pipeline is being bootstrapped.
 
-In the running app, use the `File` menu to open individual Org files or whole directories (including synced locations such as Google Drive). The `Roots` menu displays currently tracked directories and lets you add dedicated agenda and habit directories without restarting.
+## Configuring Org Directories
 
-The UI automatically switches to a single-column layout and touch-friendly styling on narrow/touch devices to keep the Org view usable on phones.
+### Slate / Expo app
+- Launch the app and open the **Library** tab. The root manager at the top lets you paste filesystem paths or, on Android, tap **Pick via Android SAF** to grant access to a Google Drive or local directory.
+- Add your main Org directory under “Org Roots” and (optionally) your Org-roam vault under “Org-roam Roots”. The selections are passed to the Rust bridge, registered with `OrgSyncService`, and synced across the Agenda, Habits, Roam, and Capture screens automatically.
+- You can remove roots at any time; the bridge will stop watching them and the UI will refresh to match.
 
-## Android Packaging
+### Legacy egui prototype
+- Set environment variables before launching: `ORG_ROOT=/path/to/org cargo run -p org_app`.
+- For multiple directories use `ORG_ROOTS`, e.g. `ORG_ROOTS="/path/to/org:/path/to/projects" cargo run -p org_app` (use `;` on Windows).
 
-The `mobile/android` Gradle project builds a stock `NativeActivity` wrapper around the Rust library.
+### Sample data
+- Integration tests now generate synthetic Org data on the fly (see `crates/org_domain/tests/`). Use your own directories in development; the repository does not ship personal Org content.
 
-1. Install prerequisites:
-   ```bash
-   rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
-   cargo install cargo-ndk
-   ```
-2. Build the shared libraries (from repo root):
-   ```bash
-   cargo ndk \
-     -t arm64-v8a -t armeabi-v7a -t x86_64 \
-     -o mobile/android/app/src/main/jniLibs \
-     --platform 33 \
-     build --release -p org_app
-   ```
-3. Assemble the APK:
-   ```bash
-   cd mobile/android
-   ./gradlew assembleDebug
-   ```
-4. Install on a device/emulator:
-   ```bash
-   adb install -r app/build/outputs/apk/debug/app-debug.apk
-   adb shell am start -n com.postep/android.app.NativeActivity
-   ```
-
-The first launch prepares an internal `org` directory inside the app sandbox. Drop Org files there (via `adb push` or SAF) to populate the library. Notifications, calendar integration, and SAF pickers are waiting on platform adapters that implement `org_core::notifications::NotificationSink`.
-
-## iOS Packaging
-
-- `mobile/ios`: Xcode workspace (to be initialized) that embeds the Rust static library via `cargo-xcode` or `uniffi` style bridges.
-
-## Roadmap
-1. Flesh out platform adapters for notifications and calendar sync.
-2. Implement storage pickers (Document Provider on Android, Files on iOS) so users can browse Google Drive, iCloud, etc., from the UI.
-3. Synchronize with local storage providers (e.g., Files app, shared folders) and, later, cloud backends.
-
-## Org Rendering Goals
-- Preserve Emacs Org mode layout (headings, drawers, TODO keywords) using `egui` widgets.
-- Provide a dedicated habit dashboard with streak indicators and completion logging.
-- Integrate the agenda with native calendars for reminders and all-day events.
-
-## Contributing
-This repo is still in early scaffolding, so expect breaking changes. Contributions around Org parsing fidelity, touch-first `egui` design, and mobile build tooling are welcome.
+Expect rapid changes as the bridge and Slate layers come online. See [`docs/architecture.md`](docs/architecture.md) for the implementation roadmap and module responsibilities.

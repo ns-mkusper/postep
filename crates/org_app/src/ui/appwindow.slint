@@ -1,0 +1,313 @@
+import { Button, ScrollView, TextEdit } from "std-widgets.slint";
+
+export enum PrimaryView { Documents, Agenda }
+
+export struct DocumentListEntry {
+    title: string,
+    path: string,
+}
+
+export struct AgendaRow {
+    id: int,
+    summary: string,
+    metadata: string,
+    context: string,
+    can_mark_done: bool,
+    is_overdue: bool,
+}
+
+export struct AgendaDay {
+    heading: string,
+    entries: [AgendaRow],
+}
+
+component DocumentCard inherits Rectangle {
+    in property <DocumentListEntry> data;
+    in property <bool> selected;
+    in property <int> index;
+
+    callback activate(index: int);
+
+    border-radius: 12px;
+    background: selected ? #3a5068 : #f3f4f6;
+    border-width: 1px;
+    border-color: selected ? #1f2937 : #e5e7eb;
+    horizontal-stretch: 1.0;
+    VerticalLayout {
+        spacing: 6px;
+        padding: 12px;
+
+        Text {
+            text: data.title;
+            color: selected ? #f9fafb : #111827;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        Text {
+            text: data.path;
+            color: selected ? #d1d5db : #4b5563;
+            font-size: 12px;
+        }
+    }
+
+    TouchArea {
+        clicked => { activate(index); }
+    }
+}
+
+component AgendaRowView inherits Rectangle {
+    in property <AgendaRow> entry;
+    callback mark_done(id: int);
+
+    background: #1f2532;
+    border-radius: 8px;
+    VerticalLayout {
+        spacing: 4px;
+        padding: 10px;
+
+        Text {
+            text: root.entry.summary;
+            color: root.entry.is_overdue ? #f87171 : #f9fafb;
+            font-weight: 600;
+        }
+
+        if root.entry.metadata != "" : Text {
+            text: root.entry.metadata;
+            color: #9fa5b5;
+            font-size: 12px;
+        }
+
+        if root.entry.context != "" : Text {
+            text: root.entry.context;
+            color: #c7ccd9;
+            font-size: 12px;
+        }
+
+        if root.entry.can_mark_done : Button {
+            text: "Mark done";
+            clicked => { mark_done(root.entry.id); }
+        }
+    }
+}
+
+component DocumentPanel inherits Rectangle {
+    in property <string> title;
+    in property <string> path;
+    in-out property <string> content;
+    in property <bool> editing;
+    in property <bool> dirty;
+
+    callback begin_edit();
+    callback stop_edit();
+    callback save();
+    callback discard();
+    callback content_changed(text: string);
+
+    border-radius: 12px;
+    background: #1a1c24;
+    VerticalLayout {
+        spacing: 12px;
+        padding: 16px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+
+            VerticalLayout {
+                spacing: 4px;
+                Text {
+                    text: title;
+                    color: #f9fafb;
+                    font-size: 20px;
+                    font-weight: 600;
+                }
+                Text {
+                    text: path;
+                    color: #9fa5b5;
+                    font-size: 12px;
+                }
+            }
+
+            Rectangle { min-width: 0px; height: 0px; horizontal-stretch: 1.0; }
+
+            Text {
+                text: dirty ? "Unsaved changes" : "All changes saved";
+                color: dirty ? #f97316 : #34d399;
+                font-size: 12px;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            if !editing : Button {
+                text: "Edit";
+                clicked => { begin_edit(); }
+            }
+            if editing : Button {
+                text: "Stop editing";
+                clicked => { stop_edit(); }
+            }
+            Button {
+                text: "Save";
+                enabled: dirty;
+                clicked => { save(); }
+            }
+            Button {
+                text: "Discard";
+                enabled: dirty;
+                clicked => { discard(); }
+            }
+        }
+
+        Rectangle {
+            background: #111217;
+            border-radius: 8px;
+            HorizontalLayout {
+                padding: 8px;
+                TextEdit {
+                    text <=> content;
+                    wrap: TextWrap.word-wrap;
+                    read-only: !editing;
+                    font-size: 14px;
+                    width: parent.width;
+                    height: 360px;
+                    edited => { content_changed(self.text); }
+                }
+            }
+        }
+    }
+}
+
+component AgendaPanel inherits Rectangle {
+    in property <[AgendaDay]> days;
+    callback mark_done(id: int);
+    callback reload();
+
+    background: #111217;
+    border-radius: 12px;
+
+    VerticalLayout {
+        spacing: 12px;
+        padding: 16px;
+
+        Button {
+            text: "Reload agenda";
+            clicked => { reload(); }
+        }
+
+        ScrollView {
+            VerticalLayout {
+                spacing: 16px;
+                for day in days : VerticalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: day.heading;
+                        color: #f9fafb;
+                        font-size: 18px;
+                        font-weight: 600;
+                    }
+                    VerticalLayout {
+                        spacing: 6px;
+                        for entry in day.entries : AgendaRowView {
+                            entry: entry;
+                            mark_done(id) => { root.mark_done(id); }
+                        }
+                    }
+                    Rectangle { height: 1px; background: #2d3444; }
+                }
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    width: 1100px;
+    height: 740px;
+    title: "Postep";
+
+    in property <PrimaryView> current_view: PrimaryView.Documents;
+    in property <[DocumentListEntry]> documents;
+    in property <int> selected_document: -1;
+    in property <string> document_title;
+    in property <string> document_path;
+    in-out property <string> document_content;
+    in property <bool> document_editing;
+    in property <bool> document_dirty;
+    in property <[AgendaDay]> agenda_days;
+    in property <string> status_message;
+
+    callback select_document(index: int);
+    callback change_view(view: PrimaryView);
+    callback request_editing(editing: bool);
+    callback request_save();
+    callback request_discard();
+    callback request_reload();
+    callback request_mark_done(id: int);
+    callback document_content_changed(text: string);
+
+    background: #0d1117;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            Button {
+                text: "Documents";
+                enabled: current_view != PrimaryView.Documents;
+                clicked => { change_view(PrimaryView.Documents); }
+            }
+            Button {
+                text: "Agenda";
+                enabled: current_view != PrimaryView.Agenda;
+                clicked => { change_view(PrimaryView.Agenda); }
+            }
+        }
+
+        if current_view == PrimaryView.Documents : VerticalLayout {
+            spacing: 16px;
+            ScrollView {
+                height: 320px;
+                VerticalLayout {
+                    spacing: 12px;
+                    for doc[i] in documents : DocumentCard {
+                        data: doc;
+                        index: i;
+                        selected: i == root.selected_document;
+                        activate(index) => { select_document(index); }
+                    }
+                }
+            }
+
+            DocumentPanel {
+                title: root.document_title;
+                path: root.document_path;
+                content <=> root.document_content;
+                editing: root.document_editing;
+                dirty: root.document_dirty;
+                begin_edit() => { root.request_editing(true); }
+                stop_edit() => { root.request_editing(false); }
+                save() => { root.request_save(); }
+                discard() => { root.request_discard(); }
+                content_changed(text) => { root.document_content_changed(text); }
+            }
+        }
+
+        if current_view == PrimaryView.Agenda : AgendaPanel {
+            days: root.agenda_days;
+            mark_done(id) => { root.request_mark_done(id); }
+            reload() => { root.request_reload(); }
+        }
+
+        Rectangle { height: 1px; background: #1f2937; }
+
+        Text {
+            text: status_message;
+            font-size: 12px;
+            color: #9fa5b5;
+        }
+    }
+}

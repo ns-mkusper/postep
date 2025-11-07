@@ -1,7 +1,3 @@
-pub mod agenda;
-pub mod document;
-pub mod habit;
-pub mod notifications;
-pub mod service;
+//! Transitional re-export crate while the codebase migrates to the new multi-crate layout.
 
-pub use crate::service::{OrgService, OrgServiceBuilder};
+pub use org_domain::*;

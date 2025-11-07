@@ -1,0 +1,14 @@
+[package]
+name = "org_roam"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+org_domain = { path = "../org_domain" }
+petgraph = "0.6"

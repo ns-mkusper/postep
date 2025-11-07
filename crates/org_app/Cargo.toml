@@ -16,12 +16,11 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-eframe = { workspace = true }
-egui = { workspace = true }
 org_core = { path = "../org_core" }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-winit = { workspace = true }
+chrono = { workspace = true }
+slint = { version = "1.5.0", features = ["std", "backend-android-activity-05", "renderer-winit-femtovg"] }
 
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-rfd = { workspace = true }
+[build-dependencies]
+slint-build = "1.5.0"
