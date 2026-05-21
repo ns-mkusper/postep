@@ -4,8 +4,10 @@
     "baseUrl": "./",
     "jsx": "react-jsx",
     "paths": {
-      "@postep/bridge": ["../..//packages/bridge/src"]
+      "@postep/bridge": ["../../packages/bridge/src"],
+      "@postep/bridge/platform/android/saf": ["../../packages/bridge/src/platform/android/saf"],
+      "expo-file-system": ["../../packages/bridge/src/typings/expo-file-system"]
     }
   },
-  "include": ["app", "components", "hooks", "store", "expo-env.d.ts"]
+  "include": ["app", "components", "hooks", "store", "lib", "types", "expo-env.d.ts"]
 }

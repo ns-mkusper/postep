@@ -24,7 +24,8 @@ export function SlateDocument({ value, readOnly = true }: SlateDocumentProps) {
     if (element.type === 'list_item') {
       const depth = (element as any).depth ?? 1;
       const ordered = (element as any).ordered ?? false;
-      const bullet = ordered ? '•' : '–';
+      const checked = (element as any).checked;
+      const bullet = checked === true ? '☑' : checked === false ? '☐' : ordered ? '1.' : '•';
       return (
         <View
           {...attributes}
@@ -34,6 +35,48 @@ export function SlateDocument({ value, readOnly = true }: SlateDocumentProps) {
             {`${bullet} `}
             {children}
           </RNText>
+        </View>
+      );
+    }
+    if (element.type === 'planning') {
+      return (
+        <View {...attributes} style={{ paddingVertical: 4, paddingHorizontal: 10, backgroundColor: '#21293B', borderRadius: 10 }}>
+          <RNText style={{ fontSize: 13, color: '#BFD0FF', fontWeight: '600' }}>{children}</RNText>
+        </View>
+      );
+    }
+    if (element.type === 'property_drawer' || element.type === 'drawer') {
+      return (
+        <View {...attributes} style={{ paddingVertical: 4, paddingHorizontal: 10, backgroundColor: '#151922', borderRadius: 10 }}>
+          <RNText style={{ fontSize: 12, color: '#8E98B3' }}>{children}</RNText>
+        </View>
+      );
+    }
+    if (element.type === 'code_block') {
+      return (
+        <View {...attributes} style={{ padding: 12, backgroundColor: '#05070B', borderRadius: 10 }}>
+          <RNText style={{ fontSize: 13, color: '#A7F3D0', lineHeight: 20, fontFamily: 'monospace' }}>{children}</RNText>
+        </View>
+      );
+    }
+    if (element.type === 'table') {
+      return (
+        <View {...attributes} style={{ padding: 10, backgroundColor: '#111722', borderRadius: 10 }}>
+          <RNText style={{ fontSize: 13, color: '#DCE4F9', lineHeight: 20, fontFamily: 'monospace' }}>{children}</RNText>
+        </View>
+      );
+    }
+    if (element.type === 'directive') {
+      return (
+        <View {...attributes} style={{ paddingVertical: 2 }}>
+          <RNText style={{ fontSize: 12, color: '#7C879F' }}>{children}</RNText>
+        </View>
+      );
+    }
+    if (element.type === 'horizontal_rule') {
+      return (
+        <View {...attributes} style={{ paddingVertical: 8 }}>
+          <RNText style={{ color: '#3B4254' }}>{children}</RNText>
         </View>
       );
     }
@@ -49,7 +92,7 @@ export function SlateDocument({ value, readOnly = true }: SlateDocumentProps) {
       <Editable
         readOnly={readOnly}
         renderElement={renderElement}
-        style={{ padding: 16 }}
+        style={{ padding: 6 }}
       />
     </Slate>
   );

@@ -85,14 +85,53 @@ export interface DocumentRef {
 }
 
 export type SlateNode =
-  | { type: 'heading'; depth: number; text: string }
-  | { type: 'paragraph'; text: string }
-  | { type: 'list_item'; depth: number; ordered: boolean; text: string };
+  | BlockMetadata & {
+      type: 'heading';
+      depth: number;
+      text: string;
+      raw: string;
+      todo_keyword?: string | null;
+      priority?: string | null;
+      tags: string[];
+    }
+  | BlockMetadata & { type: 'planning'; keyword: string; text: string; raw: string }
+  | BlockMetadata & {
+      type: 'property_drawer';
+      properties: Record<string, string>;
+      raw: string;
+      collapsed: boolean;
+    }
+  | BlockMetadata & { type: 'drawer'; name: string; text: string; raw: string; collapsed: boolean }
+  | BlockMetadata & { type: 'paragraph'; text: string; raw: string }
+  | BlockMetadata & {
+      type: 'list_item';
+      depth: number;
+      ordered: boolean;
+      checked?: boolean | null;
+      text: string;
+      raw: string;
+    }
+  | BlockMetadata & { type: 'code_block'; language?: string | null; text: string; raw: string }
+  | BlockMetadata & { type: 'table'; rows: string[][]; raw: string }
+  | BlockMetadata & { type: 'directive'; keyword: string; text: string; raw: string }
+  | BlockMetadata & { type: 'horizontal_rule'; raw: string };
+
+export interface BlockMetadata {
+  line_start: number;
+  line_end: number;
+}
 
 export interface DocumentPayload {
   path: string;
   raw: string;
   slate: SlateNode[];
+}
+
+export interface UpdateDocumentRequest {
+  roots: string[];
+  roamRoots?: string[];
+  path: string;
+  raw: string;
 }
 
 type NativeModule = {
@@ -113,6 +152,12 @@ type NativeModule = {
   load_roam_graph(config: OrgBridgeConfig): RoamGraph;
   list_documents(config: OrgBridgeConfig): string[];
   load_document(config: OrgBridgeConfig, path: string): DocumentPayload;
+  update_document(params: {
+    roots: string[];
+    roam_roots?: string[];
+    path: string;
+    raw: string;
+  }): DocumentPayload;
   set_roots(config: OrgBridgeConfig): void;
   set_agenda_status(params: {
     roots: string[];
@@ -224,6 +269,21 @@ export function loadDocument(config: OrgBridgeConfig, path: string): DocumentPay
     return { path, raw: '', slate: [] };
   }
   return resolveNativeBinding().load_document(config, path);
+}
+
+export function updateDocument(request: UpdateDocumentRequest): DocumentPayload {
+  if (request.roots.length === 0) {
+    throw new Error('No Org roots configured');
+  }
+  const payload = resolveNativeBinding().update_document({
+    roots: request.roots,
+    roam_roots: request.roamRoots,
+    path: request.path,
+    raw: request.raw
+  });
+  emitBridgeEvent('documentsChanged');
+  emitBridgeEvent('agendaChanged');
+  return payload;
 }
 
 export const EMPTY_CONFIG: OrgBridgeConfig = { roots: [] };
