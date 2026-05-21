@@ -1,7 +1,5 @@
 appId: com.postep.mobile
 ---
-- launchApp:
-    clearState: true
 - waitForAnimationToEnd:
     timeout: 15000
 - tapOn:
