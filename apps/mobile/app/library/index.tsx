@@ -186,9 +186,9 @@ export default function LibraryScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} testID="documents-screen">
       <View style={styles.statusBar}>
-        <Text style={styles.statusTitle}>Org Library</Text>
+        <Text style={styles.statusTitle} testID="org-library-title">Org Library</Text>
         <View style={styles.statusRow}>
           <Text style={styles.statusPill}>Local Org · {documentsQuery.data?.length ?? 0} files</Text>
           <TouchableOpacity onPress={onRefreshDocuments} style={styles.refreshButton}>
@@ -271,6 +271,7 @@ export default function LibraryScreen() {
       </View>
 
       <FlatList
+        testID="document-chip-list"
         data={documentsQuery.data ?? []}
         horizontal
         keyExtractor={(item) => item.path}
@@ -284,6 +285,7 @@ export default function LibraryScreen() {
           <TouchableOpacity
             style={[styles.docChip, selectedPath === item.path && styles.docChipSelected]}
             onPress={() => setSelectedPath(item.path)}
+            testID={`document-chip-${item.name}`}
           >
             <Text style={styles.docChipText}>{item.name}</Text>
           </TouchableOpacity>
@@ -298,24 +300,28 @@ export default function LibraryScreen() {
       </View>
 
       {showDocument && (
-        <ScrollView style={styles.documentScroll} contentContainerStyle={{ paddingBottom: 48 }}>
+        <ScrollView testID="document-scroll" style={styles.documentScroll} contentContainerStyle={{ paddingBottom: 48 }}>
           {documentQuery.isFetching && <ActivityIndicator style={{ marginVertical: 24 }} color="#4C6EF5" />}
           {!documentQuery.isFetching && documentQuery.data && blocks.length > 0 && (
             <View style={styles.blocksContainer}>
               {blocks.map((block) => {
                 const isEditing = editingBlockId === block.id;
                 return (
-                  <View key={block.id} style={[styles.blockCard, block.node.type === 'heading' && styles.headingCard]}>
+                  <View
+                    key={block.id}
+                    testID={`org-block-card-${block.node.type}-${block.node.line_start}`}
+                    style={[styles.blockCard, block.node.type === 'heading' && styles.headingCard]}
+                  >
                     <View style={styles.blockToolbar}>
                       <Text style={styles.blockType}>{block.node.type.replace('_', ' ')}</Text>
                       <View style={styles.blockActions}>
-                        <TouchableOpacity onPress={() => moveBlock(block, -1)} style={styles.smallAction}>
+                        <TouchableOpacity testID={`block-move-up-${block.node.line_start}`} onPress={() => moveBlock(block, -1)} style={styles.smallAction}>
                           <Text style={styles.smallActionText}>↑</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity onPress={() => moveBlock(block, 1)} style={styles.smallAction}>
+                        <TouchableOpacity testID={`block-move-down-${block.node.line_start}`} onPress={() => moveBlock(block, 1)} style={styles.smallAction}>
                           <Text style={styles.smallActionText}>↓</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity onPress={() => startEditing(block)} style={styles.smallAction}>
+                        <TouchableOpacity testID={`block-edit-${block.node.line_start}`} onPress={() => startEditing(block)} style={styles.smallAction}>
                           <Text style={styles.smallActionText}>Edit</Text>
                         </TouchableOpacity>
                       </View>
@@ -323,6 +329,7 @@ export default function LibraryScreen() {
                     {isEditing ? (
                       <View>
                         <TextInput
+                          testID="block-editor"
                           style={styles.blockEditor}
                           value={draftRaw}
                           onChangeText={setDraftRaw}
@@ -334,7 +341,7 @@ export default function LibraryScreen() {
                           <TouchableOpacity style={styles.cancelButton} onPress={() => setEditingBlockId(null)}>
                             <Text style={styles.cancelText}>Cancel</Text>
                           </TouchableOpacity>
-                          <TouchableOpacity style={styles.saveButton} onPress={() => saveBlockEdit(block)}>
+                          <TouchableOpacity testID="block-save" style={styles.saveButton} onPress={() => saveBlockEdit(block)}>
                             <Text style={styles.saveText}>Save</Text>
                           </TouchableOpacity>
                         </View>

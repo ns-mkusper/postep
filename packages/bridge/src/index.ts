@@ -1,8 +1,3 @@
-import { existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-
 export interface OrgBridgeConfig {
   roots: string[];
   roamRoots?: string[];
@@ -169,7 +164,6 @@ type NativeModule = {
 };
 
 let cachedBinding: NativeModule | null = null;
-const requireNative = createRequire(import.meta.url);
 
 export type BridgeEvent = 'agendaChanged' | 'documentsChanged' | 'rootsChanged';
 
@@ -181,16 +175,41 @@ const bridgeListeners: Record<BridgeEvent, Set<BridgeListener>> = {
   rootsChanged: new Set()
 };
 
+export const E2E_ORG_ROOT = 'postep-e2e://org';
+
+function isE2EBridge(): boolean {
+  return getEnv('EXPO_PUBLIC_POSTEP_E2E') === '1' || getEnv('POSTEP_E2E') === '1';
+}
+
+function getEnv(key: string): string | undefined {
+  const maybeProcess = globalThis as typeof globalThis & {
+    process?: { env?: Record<string, string | undefined> };
+  };
+  return maybeProcess.process?.env?.[key];
+}
+
 function resolveNativeBinding(): NativeModule {
+  if (isE2EBridge()) {
+    return e2eNativeModule;
+  }
   if (cachedBinding) {
     return cachedBinding;
   }
 
-  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const requireNative = eval('require') as NodeRequire;
+  const { existsSync } = requireNative('node:fs') as typeof import('node:fs');
+  const { join } = requireNative('node:path') as typeof import('node:path');
+  const cwd = typeof process !== 'undefined' && process.cwd ? process.cwd() : '.';
+  const localDir = typeof __dirname !== 'undefined' ? __dirname : cwd;
   const candidatePaths = [
-    join(__dirname, '../native/index.node'),
-    join(__dirname, '../../../target/debug/org_bridge.node'),
-    join(__dirname, '../../../target/release/org_bridge.node')
+    join(localDir, '../native/index.node'),
+    join(localDir, '../../../target/debug/org_bridge.node'),
+    join(localDir, '../../../target/release/org_bridge.node'),
+    join(cwd, 'packages/bridge/native/index.node'),
+    join(cwd, 'target/debug/org_bridge.node'),
+    join(cwd, 'target/release/org_bridge.node'),
+    join(cwd, '../../target/debug/org_bridge.node'),
+    join(cwd, '../../target/release/org_bridge.node')
   ];
 
   for (const candidate of candidatePaths) {
@@ -352,4 +371,300 @@ function normalizeHabit(habit: Habit): Habit {
     repeater: habit.repeater ?? null,
     last_repeat: habit.last_repeat ?? null
   };
+}
+
+const e2eDocs = new Map<string, string>();
+
+function ensureE2EDocs(): void {
+  if (e2eDocs.size > 0) {
+    return;
+  }
+  for (let index = 1; index <= 10; index += 1) {
+    const day = String(index).padStart(2, '0');
+    const raw = `#+TITLE: E2E Org Sample ${index}
+#+CATEGORY: postep-e2e
+* TODO [#A] Morning habit ${index} :habit:daily:
+SCHEDULED: <2026-05-${day} Thu 06:30 +1d>
+:PROPERTIES:
+:STYLE: habit
+:LAST_REPEAT: [2026-05-${day} Thu]
+:END:
+:LOGBOOK:
+- State "DONE" from "TODO" [2026-05-${day} Thu]
+:END:
+- [ ] open app workflow ${index}
+- [X] render org blocks ${index}
+
+* WAITING Agenda item ${index} :agenda:
+DEADLINE: <2026-06-${day} Mon 09:00>
+Common agenda text for full launched UI automation ${index}.
+
+* Notes ${index}
+| Metric | Budget |
+| Move | 8ms |
+#+BEGIN_SRC shell
+echo e2e-${index}
+#+END_SRC
+`;
+    e2eDocs.set(`${E2E_ORG_ROOT}/sample-${day}.org`, raw);
+  }
+}
+
+const e2eNativeModule: NativeModule = {
+  ping: () => 'postep-org-bridge-e2e',
+  load_agenda_snapshot: () => buildE2EAgendaSnapshot(),
+  complete_agenda_item: ({ path, headline_line }) => {
+    setE2EHeadlineStatus(path, headline_line, 'DONE');
+    return buildE2EAgendaSnapshot();
+  },
+  append_capture_entry: ({ target_path, content }) => {
+    ensureE2EDocs();
+    const path = target_path.includes('://') ? target_path : `${E2E_ORG_ROOT}/${target_path}`;
+    const previous = e2eDocs.get(path) ?? '';
+    e2eDocs.set(path, `${previous}${previous.endsWith('\n') || previous.length === 0 ? '' : '\n'}${content}\n`);
+    return buildE2EAgendaSnapshot();
+  },
+  load_roam_graph: () => ({ nodes: [], links: [] }),
+  list_documents: () => {
+    ensureE2EDocs();
+    return [...e2eDocs.keys()].sort();
+  },
+  load_document: (_config, path) => loadE2EDocument(path),
+  update_document: ({ path, raw }) => {
+    ensureE2EDocs();
+    e2eDocs.set(path, raw);
+    return loadE2EDocument(path);
+  },
+  set_roots: () => {
+    ensureE2EDocs();
+  },
+  set_agenda_status: ({ path, headline_line, status }) => {
+    setE2EHeadlineStatus(path, headline_line, status);
+    return buildE2EAgendaSnapshot();
+  }
+};
+
+function loadE2EDocument(path: string): DocumentPayload {
+  ensureE2EDocs();
+  const raw = e2eDocs.get(path) ?? '';
+  return { path, raw, slate: rawToSlate(raw) };
+}
+
+function buildE2EAgendaSnapshot(): AgendaSnapshot {
+  ensureE2EDocs();
+  const items: AgendaItem[] = [];
+  const habits: Habit[] = [];
+  for (const [path, raw] of e2eDocs) {
+    const lines = raw.split('\n');
+    for (let idx = 0; idx < lines.length; idx += 1) {
+      const heading = parseHeading(lines[idx]);
+      if (!heading) {
+        continue;
+      }
+      const nextHeading = findNextHeading(lines, idx + 1);
+      const body = lines.slice(idx + 1, nextHeading).join('\n');
+      const scheduled = body.match(/SCHEDULED:\s+<([^>]+)>/);
+      const deadline = body.match(/DEADLINE:\s+<([^>]+)>/);
+      const styleHabit = /:STYLE:\s*habit/i.test(body);
+      const planning = scheduled ?? deadline;
+      const kind = scheduled ? 'Scheduled' : deadline ? 'Deadline' : 'Floating';
+      items.push({
+        title: heading.text,
+        date: planning?.[1]?.slice(0, 10) ?? null,
+        time: planning?.[1]?.match(/\b\d{2}:\d{2}\b/)?.[0] ?? null,
+        context: body.split('\n').filter(Boolean).slice(0, 3).join('\n'),
+        path,
+        headline_line: idx,
+        todo_keyword: heading.todo_keyword,
+        kind,
+        timestamp_raw: planning?.[1] ?? null,
+        repeater: planning?.[1]?.includes('+1d') ? { amount: 1, unit: 'Day' } : null
+      });
+      if (styleHabit) {
+        habits.push({
+          title: `${heading.todo_keyword ? `${heading.todo_keyword} ` : ''}${heading.text}`,
+          scheduled: scheduled?.[1]?.slice(0, 10) ?? null,
+          description: body.split('\n').filter((line) => line.startsWith('- [')).join('\n'),
+          repeater: { raw: '+1d', frequency: { Daily: 1 } },
+          log_entries: [{ date: scheduled?.[1]?.slice(0, 10) ?? '2026-05-01', state: 'DONE' }],
+          last_repeat: body.match(/:LAST_REPEAT:\s+\[(\d{4}-\d{2}-\d{2})/)?.[1] ?? null
+        });
+      }
+    }
+  }
+  return { items, habits };
+}
+
+function setE2EHeadlineStatus(path: string, headlineLine: number, status: string): void {
+  const doc = loadE2EDocument(path);
+  const lines = doc.raw.split('\n');
+  const line = lines[headlineLine];
+  const heading = parseHeading(line);
+  if (!line || !heading) {
+    return;
+  }
+  const stars = line.match(/^(\*+)\s+/)?.[1] ?? '*';
+  const tags = heading.tags.length > 0 ? ` :${heading.tags.join(':')}:` : '';
+  const priority = heading.priority ? `[#${heading.priority}] ` : '';
+  lines[headlineLine] = `${stars} ${status} ${priority}${heading.text}${tags}`;
+  e2eDocs.set(path, lines.join('\n'));
+}
+
+function rawToSlate(raw: string): SlateNode[] {
+  const lines = raw.split('\n');
+  const nodes: SlateNode[] = [];
+  let idx = 0;
+  while (idx < lines.length) {
+    const line = lines[idx];
+    const trimmed = line.trim();
+    if (!trimmed) {
+      idx += 1;
+      continue;
+    }
+    const heading = parseHeading(line);
+    if (heading) {
+      nodes.push({
+        type: 'heading',
+        depth: heading.depth,
+        text: heading.text,
+        raw: line,
+        todo_keyword: heading.todo_keyword,
+        priority: heading.priority,
+        tags: heading.tags,
+        line_start: idx,
+        line_end: idx
+      });
+      idx += 1;
+      continue;
+    }
+    const planning = trimmed.match(/^(SCHEDULED|DEADLINE|CLOSED):\s+(.*)$/);
+    if (planning) {
+      nodes.push({ type: 'planning', keyword: planning[1], text: planning[2], raw: line, line_start: idx, line_end: idx });
+      idx += 1;
+      continue;
+    }
+    if (trimmed === ':PROPERTIES:') {
+      const start = idx;
+      const properties: Record<string, string> = {};
+      const rawLines = [line];
+      idx += 1;
+      while (idx < lines.length) {
+        rawLines.push(lines[idx]);
+        const property = lines[idx].trim().match(/^:([^:]+):\s*(.*)$/);
+        if (property && property[1] !== 'END') {
+          properties[property[1]] = property[2];
+        }
+        if (lines[idx].trim() === ':END:') {
+          idx += 1;
+          break;
+        }
+        idx += 1;
+      }
+      nodes.push({
+        type: 'property_drawer',
+        properties,
+        raw: rawLines.join('\n'),
+        collapsed: true,
+        line_start: start,
+        line_end: idx - 1
+      });
+      continue;
+    }
+    const list = line.match(/^(\s*)([-+]|\d+[.)])\s+(\[[ xX]\]\s+)?(.*)$/);
+    if (list) {
+      nodes.push({
+        type: 'list_item',
+        depth: Math.floor(list[1].length / 2) + 1,
+        ordered: /\d/.test(list[2]),
+        checked: list[3] ? /x/i.test(list[3]) : null,
+        text: list[4],
+        raw: line,
+        line_start: idx,
+        line_end: idx
+      });
+      idx += 1;
+      continue;
+    }
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+      const start = idx;
+      const rawLines: string[] = [];
+      const rows: string[][] = [];
+      while (idx < lines.length && lines[idx].trim().startsWith('|') && lines[idx].trim().endsWith('|')) {
+        rawLines.push(lines[idx]);
+        rows.push(lines[idx].trim().replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim()));
+        idx += 1;
+      }
+      nodes.push({ type: 'table', rows, raw: rawLines.join('\n'), line_start: start, line_end: idx - 1 });
+      continue;
+    }
+    if (/^#\+BEGIN_SRC/i.test(trimmed)) {
+      const start = idx;
+      const language = trimmed.split(/\s+/)[1] ?? null;
+      const rawLines = [line];
+      const body: string[] = [];
+      idx += 1;
+      while (idx < lines.length) {
+        rawLines.push(lines[idx]);
+        if (/^#\+END_SRC/i.test(lines[idx].trim())) {
+          idx += 1;
+          break;
+        }
+        body.push(lines[idx]);
+        idx += 1;
+      }
+      nodes.push({ type: 'code_block', language, text: body.join('\n'), raw: rawLines.join('\n'), line_start: start, line_end: idx - 1 });
+      continue;
+    }
+    if (trimmed.startsWith('#+')) {
+      const [keyword, ...rest] = trimmed.slice(2).split(':');
+      nodes.push({ type: 'directive', keyword, text: rest.join(':').trim(), raw: line, line_start: idx, line_end: idx });
+      idx += 1;
+      continue;
+    }
+    nodes.push({ type: 'paragraph', text: trimmed, raw: line, line_start: idx, line_end: idx });
+    idx += 1;
+  }
+  return nodes;
+}
+
+function parseHeading(line: string): null | {
+  depth: number;
+  text: string;
+  todo_keyword: string | null;
+  priority: string | null;
+  tags: string[];
+} {
+  const match = line.match(/^(\*+)\s+(.*)$/);
+  if (!match) {
+    return null;
+  }
+  let content = match[2].trim();
+  let tags: string[] = [];
+  const tagMatch = content.match(/\s+:([^\s]+):$/);
+  if (tagMatch) {
+    tags = tagMatch[1].split(':').filter(Boolean);
+    content = content.slice(0, tagMatch.index).trim();
+  }
+  let todo_keyword: string | null = null;
+  const todoMatch = content.match(/^([A-Z][A-Z_-]*)\s+(.*)$/);
+  if (todoMatch) {
+    todo_keyword = todoMatch[1];
+    content = todoMatch[2].trim();
+  }
+  let priority: string | null = null;
+  const priorityMatch = content.match(/^\[#([A-Z])\]\s+(.*)$/);
+  if (priorityMatch) {
+    priority = priorityMatch[1];
+    content = priorityMatch[2].trim();
+  }
+  return { depth: match[1].length, text: content, todo_keyword, priority, tags };
+}
+
+function findNextHeading(lines: string[], start: number): number {
+  for (let idx = start; idx < lines.length; idx += 1) {
+    if (/^\*+\s+/.test(lines[idx])) {
+      return idx;
+    }
+  }
+  return lines.length;
 }

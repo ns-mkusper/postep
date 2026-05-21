@@ -11,6 +11,9 @@
     "experiments": {
       "typedRoutes": true
     },
+    "android": {
+      "package": "com.postep.mobile"
+    },
     "plugins": [
       "expo-router",
       "expo-secure-store"

@@ -82,8 +82,9 @@ export default function AgendaScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} testID="agenda-screen">
       <FlatList
+        testID="agenda-list"
         style={styles.list}
         data={groups}
         keyExtractor={(item) => item.date}
@@ -94,10 +95,11 @@ export default function AgendaScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{item.date === 'unscheduled' ? 'Inbox' : item.date}</Text>
             {item.list.map((agenda) => (
-              <View key={`${agenda.path}:${agenda.headline_line}`} style={styles.cardRow}>
+              <View key={`${agenda.path}:${agenda.headline_line}`} testID={`agenda-card-${agenda.headline_line}`} style={styles.cardRow}>
                 <TouchableOpacity
                   style={styles.statusButton}
                   onPress={() => setPickerItem(agenda)}
+                  testID={`agenda-status-${agenda.headline_line}`}
                 >
                   <Text style={styles.statusButtonText}>{currentStatusLabel(agenda)}</Text>
                 </TouchableOpacity>

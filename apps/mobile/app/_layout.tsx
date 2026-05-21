@@ -5,6 +5,9 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
+import { E2ENav } from '../components/E2ENav';
+
+const isE2E = process.env.EXPO_PUBLIC_POSTEP_E2E === '1';
 
 export default function RootLayout() {
   const scheme = useColorScheme();
@@ -15,8 +18,9 @@ export default function RootLayout() {
       <QueryClientProvider client={queryClient}>
         <ThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
           <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+          <E2ENav />
           <Drawer
-            initialRouteName="agenda/index"
+            initialRouteName={isE2E ? "library/index" : "agenda/index"}
             screenOptions={{
               headerTintColor: scheme === 'dark' ? '#F5F6FA' : '#111827',
               headerStyle: { backgroundColor: scheme === 'dark' ? '#050607' : '#FFFFFF' },

@@ -24,12 +24,13 @@ export default function HabitsScreen() {
 
   return (
     <FlatList
+      testID="habits-list"
       style={styles.list}
       data={habits}
       keyExtractor={(item) => item.title}
       contentContainerStyle={{ padding: 16 }}
       renderItem={({ item }) => (
-        <View style={styles.card}>
+        <View style={styles.card} testID="habit-card">
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text style={styles.title}>{item.title}</Text>
             <Text style={styles.streak}>{item.last_repeat ?? '—'}</Text>

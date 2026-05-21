@@ -1,0 +1,28 @@
+appId: com.postep.mobile
+---
+- launchApp:
+    clearState: true
+- assertVisible: "E2E Documents"
+- assertVisible: "Org Library"
+- assertVisible: "Local Org · 10 files"
+- assertVisible: "sample-01.org"
+- tapOn: "sample-01.org"
+- assertVisible: "TODO [#A] Morning habit 1 :habit:daily:"
+- assertVisible: "SCHEDULED: <2026-05-01 Thu 06:30 +1d>"
+- tapOn:
+    id: "block-move-down-2"
+- assertVisible: "blockMove"
+- tapOn:
+    id: "block-edit-2"
+- assertVisible:
+    id: "block-editor"
+- tapOn:
+    id: "block-editor"
+- inputText: " edited"
+- tapOn:
+    id: "block-save"
+- assertVisible: "blockEdit"
+- tapOn: "E2E Agenda"
+- assertVisible: "Agenda item 1"
+- tapOn: "E2E Habits"
+- assertVisible: "Morning habit 1"
