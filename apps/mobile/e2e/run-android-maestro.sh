@@ -19,6 +19,6 @@ for _ in $(seq 1 60); do
 done
 curl -fsS http://127.0.0.1:8081/status || { cat /tmp/postep-expo.log; exit 1; }
 
-timeout 120s npm run e2e:android:install
+timeout 300s npm run e2e:android:install
 adb shell monkey -p com.postep.mobile 1
 timeout 180s maestro test e2e/maestro
