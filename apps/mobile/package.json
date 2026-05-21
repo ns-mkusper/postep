@@ -12,7 +12,7 @@
     "test:ux": "tsx --test __tests__/*.test.ts",
     "e2e:android:prebuild": "EXPO_PUBLIC_POSTEP_E2E=1 CI=1 expo prebuild --platform android --clean",
     "e2e:android:build": "cd android && ./gradlew assembleDebug",
-    "e2e:android:install": "adb install -r -t -d -g --no-streaming android/app/build/outputs/apk/debug/app-debug.apk"
+    "e2e:android:install": "adb install -r -t -d -g android/app/build/outputs/apk/debug/app-debug.apk"
   },
   "dependencies": {
     "expo": "~51.0.0",
