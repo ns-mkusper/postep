@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+adb reverse tcp:8081 tcp:8081
+EXPO_PUBLIC_POSTEP_E2E=1 CI=1 npx expo start --clear --host localhost > /tmp/postep-expo.log 2>&1 &
+METRO_PID=$!
+cleanup() {
+  kill "$METRO_PID" >/dev/null 2>&1 || true
+  cat /tmp/postep-expo.log || true
+}
+trap cleanup EXIT
+
+for _ in $(seq 1 60); do
+  if curl -fsS http://127.0.0.1:8081/status >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+curl -fsS http://127.0.0.1:8081/status || { cat /tmp/postep-expo.log; exit 1; }
+
+timeout 120s npm run e2e:android:install
+adb shell monkey -p com.postep.mobile 1
+timeout 180s maestro test e2e/maestro
