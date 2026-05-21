@@ -67,5 +67,4 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
-            cd apps/mobile
-            bash e2e/run-android-maestro.sh
+            bash apps/mobile/e2e/run-android-maestro.sh
