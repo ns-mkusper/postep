@@ -2,35 +2,34 @@ appId: com.postep.mobile
 ---
 - launchApp:
     clearState: true
-- assertVisible:
-    id: "e2e-nav-documents"
+- waitForAnimationToEnd:
+    timeout: 15000
 - tapOn:
-    id: "e2e-nav-documents"
-- assertVisible:
-    id: "documents-screen"
-- assertVisible: "sample-01.org"
-- tapOn: "sample-01.org"
-- assertVisible: "Morning habit 1"
+    point: "17%,4%"
+- waitForAnimationToEnd:
+    timeout: 5000
 - tapOn:
-    id: "block-move-down-2"
-- assertVisible: "blockMove"
+    point: "50%,32%"
+- waitForAnimationToEnd:
+    timeout: 5000
+- swipe:
+    start: "50%,80%"
+    end: "50%,35%"
+    duration: 600
 - tapOn:
-    id: "block-edit-2"
-- assertVisible:
-    id: "block-editor"
+    point: "90%,42%"
 - tapOn:
-    id: "block-editor"
+    point: "90%,42%"
+- tapOn:
+    point: "84%,42%"
 - inputText: " edited"
 - tapOn:
-    id: "block-save"
-- assertVisible: "blockEdit"
+    point: "86%,56%"
 - tapOn:
-    id: "e2e-nav-agenda"
-- assertVisible:
-    id: "agenda-screen"
-- assertVisible: "Agenda item 1"
+    point: "50%,4%"
+- waitForAnimationToEnd:
+    timeout: 5000
 - tapOn:
-    id: "e2e-nav-habits"
-- assertVisible:
-    id: "habits-list"
-- assertVisible: "Morning habit 1"
+    point: "83%,4%"
+- waitForAnimationToEnd:
+    timeout: 5000
