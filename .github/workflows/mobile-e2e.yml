@@ -71,7 +71,13 @@ jobs:
             EXPO_PUBLIC_POSTEP_E2E=1 CI=1 npx expo start --clear --host localhost > /tmp/postep-expo.log 2>&1 &
             METRO_PID=$!
             trap 'kill $METRO_PID || true; cat /tmp/postep-expo.log || true' EXIT
-            npx wait-on@7.2.0 tcp:127.0.0.1:8081
-            npm run e2e:android:install
+            for attempt in $(seq 1 60); do
+              if curl -fsS http://127.0.0.1:8081/status >/dev/null 2>&1; then
+                break
+              fi
+              sleep 2
+            done
+            curl -fsS http://127.0.0.1:8081/status || { cat /tmp/postep-expo.log; exit 1; }
+            timeout 120s npm run e2e:android:install
             adb shell monkey -p com.postep.mobile 1
-            maestro test e2e/maestro
+            timeout 180s maestro test e2e/maestro
