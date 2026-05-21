@@ -18,7 +18,6 @@ export default function RootLayout() {
       <QueryClientProvider client={queryClient}>
         <ThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
           <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-          <E2ENav />
           <Drawer
             initialRouteName={isE2E ? "library/index" : "agenda/index"}
             screenOptions={{
@@ -33,6 +32,7 @@ export default function RootLayout() {
             <Drawer.Screen name="capture/index" options={{ title: 'Capture' }} />
             <Drawer.Screen name="library/index" options={{ title: 'Documents' }} />
           </Drawer>
+          <E2ENav />
         </ThemeProvider>
       </QueryClientProvider>
     </GestureHandlerRootView>

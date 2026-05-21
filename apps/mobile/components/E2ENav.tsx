@@ -3,9 +3,8 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { router } from 'expo-router';
 import { isE2EMode } from '@postep/bridge';
 
-const isE2E = isE2EMode();
-
 export function E2ENav() {
+  const isE2E = process.env.EXPO_PUBLIC_POSTEP_E2E === '1' || isE2EMode();
   if (!isE2E) {
     return null;
   }
@@ -27,6 +26,12 @@ export function E2ENav() {
 
 const styles = StyleSheet.create({
   container: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 1000,
+    elevation: 1000,
     flexDirection: 'row',
     gap: 6,
     paddingHorizontal: 8,
