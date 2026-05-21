@@ -36,4 +36,4 @@ for _ in $(seq 1 150); do
   sleep 1
 done
 grep -q "Android Bundled" /tmp/postep-expo.log || { cat /tmp/postep-expo.log; exit 1; }
-timeout 240s maestro test e2e/maestro
+timeout 120s maestro test e2e/maestro

@@ -7,29 +7,18 @@ appId: com.postep.mobile
 - tapOn:
     point: "17%,4%"
 - waitForAnimationToEnd:
-    timeout: 5000
+    timeout: 3000
 - tapOn:
     point: "50%,32%"
 - waitForAnimationToEnd:
-    timeout: 5000
+    timeout: 3000
 - swipe:
     start: "50%,80%"
     end: "50%,35%"
-    duration: 600
+    duration: 500
 - tapOn:
     point: "90%,42%"
-- tapOn:
-    point: "90%,42%"
-- tapOn:
-    point: "84%,42%"
-- inputText: " edited"
-- tapOn:
-    point: "86%,56%"
-- tapOn:
-    point: "50%,4%"
-- waitForAnimationToEnd:
-    timeout: 5000
 - tapOn:
     point: "83%,4%"
 - waitForAnimationToEnd:
-    timeout: 5000
+    timeout: 3000
