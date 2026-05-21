@@ -9,7 +9,7 @@ for _ in $(seq 1 60); do
   fi
   sleep 2
 done
-sleep 30
+sleep 120
 adb reverse tcp:8081 tcp:8081
 EXPO_PUBLIC_POSTEP_E2E=1 CI=1 npx expo start --clear --host localhost > /tmp/postep-expo.log 2>&1 &
 METRO_PID=$!
