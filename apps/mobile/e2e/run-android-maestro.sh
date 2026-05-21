@@ -29,4 +29,11 @@ curl -fsS http://127.0.0.1:8081/status || { cat /tmp/postep-expo.log; exit 1; }
 
 timeout 300s npm run e2e:android:install
 adb shell monkey -p com.postep.mobile 1
-timeout 180s maestro test e2e/maestro
+for _ in $(seq 1 150); do
+  if grep -q "Android Bundled" /tmp/postep-expo.log; then
+    break
+  fi
+  sleep 1
+done
+grep -q "Android Bundled" /tmp/postep-expo.log || { cat /tmp/postep-expo.log; exit 1; }
+timeout 240s maestro test e2e/maestro
