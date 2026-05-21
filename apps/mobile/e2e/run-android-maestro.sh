@@ -27,7 +27,18 @@ for _ in $(seq 1 60); do
 done
 curl -fsS http://127.0.0.1:8081/status || { cat /tmp/postep-expo.log; exit 1; }
 
-timeout 300s npm run e2e:android:install
+for attempt in 1 2 3; do
+  if timeout 300s npm run e2e:android:install; then
+    break
+  fi
+  adb kill-server || true
+  adb start-server || true
+  adb wait-for-device
+  sleep 30
+  if [ "$attempt" = "3" ]; then
+    exit 1
+  fi
+done
 adb shell monkey -p com.postep.mobile 1
 for _ in $(seq 1 150); do
   if grep -q "Android Bundled" /tmp/postep-expo.log; then
