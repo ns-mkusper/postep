@@ -1,8 +1,9 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { router } from 'expo-router';
+import { isE2EMode } from '@postep/bridge';
 
-const isE2E = process.env.EXPO_PUBLIC_POSTEP_E2E === '1';
+const isE2E = isE2EMode();
 
 export function E2ENav() {
   if (!isE2E) {

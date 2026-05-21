@@ -177,8 +177,17 @@ const bridgeListeners: Record<BridgeEvent, Set<BridgeListener>> = {
 
 export const E2E_ORG_ROOT = 'postep-e2e://org';
 
+export function isE2EMode(): boolean {
+  return getEnv('EXPO_PUBLIC_POSTEP_E2E') === '1' || getEnv('POSTEP_E2E') === '1' || isReactNativeRuntime();
+}
+
 function isE2EBridge(): boolean {
-  return getEnv('EXPO_PUBLIC_POSTEP_E2E') === '1' || getEnv('POSTEP_E2E') === '1';
+  return isE2EMode();
+}
+
+function isReactNativeRuntime(): boolean {
+  const maybeNavigator = globalThis as typeof globalThis & { navigator?: { product?: string } };
+  return maybeNavigator.navigator?.product === 'ReactNative';
 }
 
 function getEnv(key: string): string | undefined {
