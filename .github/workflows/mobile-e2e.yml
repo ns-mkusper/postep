@@ -51,6 +51,10 @@ jobs:
       - name: Cache Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Build Android debug APK
+        working-directory: apps/mobile
+        run: npm run e2e:android:build
+
       - name: Run Maestro Android E2E
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -68,6 +72,6 @@ jobs:
             METRO_PID=$!
             trap 'kill $METRO_PID || true; cat /tmp/postep-expo.log || true' EXIT
             npx wait-on@7.2.0 tcp:127.0.0.1:8081
-            EXPO_PUBLIC_POSTEP_E2E=1 npm run e2e:android:install
+            npm run e2e:android:install
             adb shell monkey -p com.postep.mobile 1
             maestro test e2e/maestro
