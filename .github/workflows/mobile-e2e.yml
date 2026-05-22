@@ -21,8 +21,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: apps/mobile/package-lock.json
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -35,7 +33,7 @@ jobs:
 
       - name: Install mobile dependencies
         working-directory: apps/mobile
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps
 
       - name: Generate Android native project
         working-directory: apps/mobile
@@ -75,12 +73,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: apps/mobile/package-lock.json
 
       - name: Install mobile dependencies
         working-directory: apps/mobile
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps
 
       - name: Install Playwright browser
         working-directory: apps/mobile
