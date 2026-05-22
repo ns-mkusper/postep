@@ -11,13 +11,12 @@ async function screenshot(page: Page, name: string) {
 test('full launched org UI workflow against 10 E2E org files', async ({ page }) => {
   await page.goto('/library');
 
-  await expect(page.getByTestId('e2e-nav-documents')).toBeVisible();
-  await expect(page.getByText('Org Library')).toBeVisible();
-  await expect(page.getByText('Local Org · 10 files')).toBeVisible();
-  await expect(page.getByText('sample-01.org')).toBeVisible();
+  await expect(page.getByText('Search Keep')).toBeVisible();
+  await expect(page.getByText('Local Org · 10 notes')).toBeVisible();
+  await expect(page.getByTestId('document-card-sample-01.org')).toBeVisible();
   await screenshot(page, '01-library-loaded');
 
-  await page.getByText('sample-01.org').click();
+  await page.getByTestId('document-card-sample-01.org').click();
   await expect(page.getByText(/Morning habit 1/).first()).toBeVisible();
   await expect(page.getByText('SCHEDULED: <2026-05-01 Thu 06:30 +1d>')).toBeVisible();
   await screenshot(page, '02-document-opened');

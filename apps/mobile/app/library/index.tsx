@@ -9,14 +9,16 @@ import {
   ActivityIndicator,
   ScrollView,
   TextInput,
-  Platform
+  useWindowDimensions
 } from 'react-native';
+import { DrawerActions } from '@react-navigation/native';
+import { router, useNavigation } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { listDocuments, loadDocument, updateDocument } from '@postep/bridge';
+import { listDocuments, loadDocument, updateDocument, type DocumentRef, type SlateNode } from '@postep/bridge';
 import { SlateDocument } from '../../components/SlateDocument';
 import { useBridgeEvent } from '../../hooks/useBridgeEvent';
-import { useBridgeConfig, useOrgConfig } from '../../store/orgConfig';
+import { useBridgeConfig } from '../../store/orgConfig';
 import {
   createBlockViewModels,
   measureInteraction,
@@ -25,26 +27,74 @@ import {
   type OrgBlockViewModel
 } from '../../lib/orgSlateModel';
 
+type NotePreview = {
+  doc: DocumentRef;
+  title: string;
+  lines: Array<{ text: string; checked?: boolean | null }>;
+  checkedCount: number;
+  tags: string[];
+};
+
+function textForNode(node: SlateNode) {
+  if ('text' in node) {
+    return node.text.trim();
+  }
+  if (node.type === 'table') {
+    return node.rows[0]?.join(' · ') ?? 'Table';
+  }
+  return node.raw.trim();
+}
+
+function titleFromDocument(doc: DocumentRef, nodes: SlateNode[]) {
+  const titleDirective = nodes.find((node) => node.type === 'directive' && node.keyword.toUpperCase() === 'TITLE');
+  if (titleDirective && 'text' in titleDirective && titleDirective.text.trim()) {
+    return titleDirective.text.trim();
+  }
+  const heading = nodes.find((node) => node.type === 'heading');
+  if (heading && 'text' in heading && heading.text.trim()) {
+    return heading.text.trim();
+  }
+  return doc.name.replace(/\.org$/i, '');
+}
+
+function buildPreview(doc: DocumentRef, config: { roots: string[]; roamRoots?: string[] }): NotePreview {
+  const payload = loadDocument(config, doc.path);
+  const title = titleFromDocument(doc, payload.slate);
+  const contentNodes = payload.slate.filter((node) => {
+    if (node.type === 'directive' && node.keyword.toUpperCase() === 'TITLE') {
+      return false;
+    }
+    return ['heading', 'list_item', 'paragraph', 'planning', 'table', 'code_block'].includes(node.type);
+  });
+  const lines = contentNodes
+    .map((node) => ({ text: textForNode(node), checked: node.type === 'list_item' ? node.checked : null }))
+    .filter((line) => line.text.length > 0 && line.text !== title)
+    .slice(0, 9);
+  const checkedCount = payload.slate.filter((node) => node.type === 'list_item' && node.checked).length;
+  const tags = Array.from(
+    new Set(
+      payload.slate
+        .filter((node): node is Extract<SlateNode, { type: 'heading' }> => node.type === 'heading')
+        .flatMap((node) => node.tags)
+    )
+  ).slice(0, 3);
+
+  return { doc, title, lines, checkedCount, tags };
+}
+
 export default function LibraryScreen() {
+  const navigation = useNavigation();
   const queryClient = useQueryClient();
   const bridgeConfig = useBridgeConfig();
-  const roots = useOrgConfig((state) => state.roots);
-  const roamRoots = useOrgConfig((state) => state.roamRoots);
-  const addRoot = useOrgConfig((state) => state.addRoot);
-  const removeRoot = useOrgConfig((state) => state.removeRoot);
-  const addRoamRoot = useOrgConfig((state) => state.addRoamRoot);
-  const removeRoamRoot = useOrgConfig((state) => state.removeRoamRoot);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [readerMode, setReaderMode] = useState(false);
   const [outlineOnly, setOutlineOnly] = useState(false);
-  const [newRoot, setNewRoot] = useState('');
-  const [newRoamRoot, setNewRoamRoot] = useState('');
-  const [pickerStatus, setPickerStatus] = useState<string | null>(null);
   const [showDocument, setShowDocument] = useState(true);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [draftRaw, setDraftRaw] = useState('');
   const [interactionStatus, setInteractionStatus] = useState<string | null>(null);
-  const isAndroid = Platform.OS === 'android';
+  const { width } = useWindowDimensions();
+  const numColumns = width >= 520 ? 2 : 1;
 
   const documentsQuery = useQuery({
     queryKey: ['documents', bridgeConfig.roots.join(':'), bridgeConfig.roamRoots?.join(':') ?? ''],
@@ -55,19 +105,22 @@ export default function LibraryScreen() {
   });
 
   useEffect(() => {
-    if (!selectedPath && documentsQuery.data && documentsQuery.data.length > 0) {
-      setSelectedPath(documentsQuery.data[0].path);
-    }
-  }, [documentsQuery.data, selectedPath]);
-
-  useEffect(() => {
     if (documentsQuery.data && selectedPath) {
       const stillExists = documentsQuery.data.some((doc) => doc.path === selectedPath);
       if (!stillExists) {
-        setSelectedPath(documentsQuery.data[0]?.path ?? null);
+        setSelectedPath(null);
       }
     }
   }, [documentsQuery.data, selectedPath]);
+
+  const noteGrid = useMemo(() => {
+    if (!documentsQuery.data || bridgeConfig.roots.length === 0) {
+      return { value: [] as NotePreview[], metric: { elapsedMs: 0 } };
+    }
+    return measureInteraction('noteGrid', () =>
+      documentsQuery.data.map((doc) => buildPreview(doc, bridgeConfig))
+    );
+  }, [bridgeConfig, documentsQuery.data]);
 
   const documentQuery = useQuery({
     queryKey: ['document', selectedPath, bridgeConfig.roots.join(':'), bridgeConfig.roamRoots?.join(':') ?? ''],
@@ -83,66 +136,21 @@ export default function LibraryScreen() {
       })
     ), [documentQuery.data?.raw, documentQuery.data?.slate, outlineOnly, readerMode]);
   const blocks = blockModel.value;
+  const selectedName = documentsQuery.data?.find((doc) => doc.path === selectedPath)?.name ?? 'Org note';
 
   useEffect(() => {
-    setInteractionStatus(`Render model ${blockModel.metric.elapsedMs.toFixed(2)}ms`);
-  }, [blockModel.metric.elapsedMs]);
+    const metric = selectedPath ? blockModel.metric.elapsedMs : noteGrid.metric.elapsedMs;
+    const label = selectedPath ? 'Render model' : 'Card grid';
+    setInteractionStatus(`${label} ${metric.toFixed(2)}ms`);
+  }, [blockModel.metric.elapsedMs, noteGrid.metric.elapsedMs, selectedPath]);
 
   const onRefreshDocuments = () => {
     queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'documents' });
-    if (selectedPath) {
-      queryClient.invalidateQueries({ queryKey: ['document', selectedPath] });
-    }
+    queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'document' });
   };
 
   useBridgeEvent('documentsChanged', onRefreshDocuments);
   useBridgeEvent('rootsChanged', onRefreshDocuments);
-
-  const handleAddRoot = () => {
-    if (!newRoot.trim()) {
-      return;
-    }
-    addRoot(newRoot.trim());
-    setNewRoot('');
-  };
-
-  const handleAddRoamRoot = () => {
-    if (!newRoamRoot.trim()) {
-      return;
-    }
-    addRoamRoot(newRoamRoot.trim());
-    setNewRoamRoot('');
-  };
-
-  const handlePickOrgRoot = async () => {
-    if (!isAndroid) {
-      return;
-    }
-    try {
-      const { requestOrgDirectory } = await import('@postep/bridge/platform/android/saf');
-      const handle = await requestOrgDirectory();
-      addRoot(handle.uri);
-      setPickerStatus(`Added ${handle.uri}`);
-    } catch (error) {
-      setPickerStatus('Picker cancelled or failed');
-      console.warn('SAF picker failed', error);
-    }
-  };
-
-  const handlePickRoamRoot = async () => {
-    if (!isAndroid) {
-      return;
-    }
-    try {
-      const { requestOrgDirectory } = await import('@postep/bridge/platform/android/saf');
-      const handle = await requestOrgDirectory();
-      addRoamRoot(handle.uri);
-      setPickerStatus(`Added roam ${handle.uri}`);
-    } catch (error) {
-      setPickerStatus('Picker cancelled or failed');
-      console.warn('SAF picker failed', error);
-    }
-  };
 
   const persistRaw = (raw: string, label: string) => {
     if (!selectedPath || bridgeConfig.roots.length === 0) {
@@ -158,6 +166,7 @@ export default function LibraryScreen() {
     );
     queryClient.setQueryData(['document', selectedPath, bridgeConfig.roots.join(':'), bridgeConfig.roamRoots?.join(':') ?? ''], payload);
     queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'agenda' });
+    queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'documents' });
     setInteractionStatus(`${label} ${metric.elapsedMs.toFixed(2)}ms`);
   };
 
@@ -185,207 +194,266 @@ export default function LibraryScreen() {
     }
   };
 
+  const openDrawer = () => navigation.dispatch(DrawerActions.openDrawer());
+
+  const renderNoteCard = ({ item }: { item: NotePreview }) => (
+    <TouchableOpacity
+      style={styles.noteCard}
+      onPress={() => setSelectedPath(item.doc.path)}
+      testID={`document-card-${item.doc.name}`}
+      activeOpacity={0.78}
+    >
+      <Text style={styles.noteTitle}>{item.title}</Text>
+      <View style={styles.previewLines}>
+        {item.lines.map((line, index) => (
+          <View key={`${line.text}:${index}`} style={styles.previewLine}>
+            <View style={[styles.checkbox, line.checked && styles.checkboxChecked]} />
+            <Text numberOfLines={index > 3 ? 1 : 2} style={[styles.previewText, line.checked && styles.previewCheckedText]}>
+              {line.text}
+            </Text>
+          </View>
+        ))}
+      </View>
+      {item.checkedCount > 0 && <Text style={styles.checkedSummary}>+ {item.checkedCount} checked items</Text>}
+      {item.tags.length > 0 && (
+        <View style={styles.tagRow}>
+          {item.tags.map((tag) => (
+            <Text key={tag} style={styles.tagChip}>#{tag}</Text>
+          ))}
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+
   return (
     <View style={styles.container} testID="documents-screen">
-      <View style={styles.statusBar}>
-        <Text style={styles.statusTitle} testID="org-library-title">Org Library</Text>
-        <View style={styles.statusRow}>
-          <Text style={styles.statusPill}>Local Org · {documentsQuery.data?.length ?? 0} files</Text>
-          <TouchableOpacity onPress={onRefreshDocuments} style={styles.refreshButton}>
-            <Text style={styles.refreshText}>Reload</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <View style={styles.switchRow}>
-        <View style={styles.switchItem}>
-          <Text style={styles.switchLabel}>Reader</Text>
-          <Switch value={readerMode} onValueChange={setReaderMode} />
-        </View>
-        <View style={styles.switchItem}>
-          <Text style={styles.switchLabel}>Outline</Text>
-          <Switch value={outlineOnly} onValueChange={setOutlineOnly} />
-        </View>
-        {interactionStatus && <Text style={styles.latencyText}>{interactionStatus}</Text>}
-      </View>
-
-      <View style={styles.rootManager}>
-        <Text style={styles.sectionHeading}>Org Roots</Text>
-        <View style={styles.chipRow}>
-          {roots.map((root) => (
-            <View key={root} style={styles.rootChip}>
-              <Text style={styles.rootChipText}>{root}</Text>
-              <TouchableOpacity style={styles.removeChipBtn} onPress={() => removeRoot(root)}>
-                <Text style={styles.removeChipText}>×</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-        </View>
-        <View style={styles.inputRow}>
-          <TextInput
-            style={styles.pathInput}
-            value={newRoot}
-            onChangeText={setNewRoot}
-            placeholder="/storage/emulated/0/Documents/org"
-            placeholderTextColor="#4F566B"
-          />
-          <TouchableOpacity style={styles.addButton} onPress={handleAddRoot}>
-            <Text style={styles.addButtonText}>Add</Text>
-          </TouchableOpacity>
-        </View>
-        {isAndroid && (
-          <TouchableOpacity style={styles.pickerButton} onPress={handlePickOrgRoot}>
-            <Text style={styles.pickerText}>Pick via Android SAF</Text>
-          </TouchableOpacity>
-        )}
-
-        <Text style={[styles.sectionHeading, { marginTop: 16 }]}>Org-roam Roots</Text>
-        <View style={styles.chipRow}>
-          {roamRoots.map((root) => (
-            <View key={root} style={styles.rootChip}>
-              <Text style={styles.rootChipText}>{root}</Text>
-              <TouchableOpacity style={styles.removeChipBtn} onPress={() => removeRoamRoot(root)}>
-                <Text style={styles.removeChipText}>×</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-        </View>
-        <View style={styles.inputRow}>
-          <TextInput
-            style={styles.pathInput}
-            value={newRoamRoot}
-            onChangeText={setNewRoamRoot}
-            placeholder="/storage/emulated/0/Documents/org-roam"
-            placeholderTextColor="#4F566B"
-          />
-          <TouchableOpacity style={styles.addButton} onPress={handleAddRoamRoot}>
-            <Text style={styles.addButtonText}>Add</Text>
-          </TouchableOpacity>
-        </View>
-        {isAndroid && (
-          <TouchableOpacity style={styles.pickerButton} onPress={handlePickRoamRoot}>
-            <Text style={styles.pickerText}>Pick Roam Directory</Text>
-          </TouchableOpacity>
-        )}
-        {pickerStatus && <Text style={styles.pickerStatus}>{pickerStatus}</Text>}
-      </View>
-
-      <FlatList
-        testID="document-chip-list"
-        data={documentsQuery.data ?? []}
-        horizontal
-        keyExtractor={(item) => item.path}
-        contentContainerStyle={styles.docList}
-        ListEmptyComponent={() => (
-          <View style={styles.emptyDocs}>
-            <Text style={styles.emptyDocsText}>Add an Org root to see documents.</Text>
-          </View>
-        )}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[styles.docChip, selectedPath === item.path && styles.docChipSelected]}
-            onPress={() => setSelectedPath(item.path)}
-            testID={`document-chip-${item.name}`}
-          >
-            <Text style={styles.docChipText}>{item.name}</Text>
-          </TouchableOpacity>
-        )}
-      />
-
-      <View style={styles.actionsRow}>
-        <TouchableOpacity style={styles.actionButton} onPress={() => setShowDocument((v) => !v)}>
-          <Text style={styles.actionButtonText}>{showDocument ? 'Hide Document' : 'Show Document'}</Text>
+      <View style={styles.keepHeader}>
+        <TouchableOpacity testID="hamburger-menu" onPress={openDrawer} style={styles.iconButton}>
+          <Text style={styles.menuIcon}>☰</Text>
         </TouchableOpacity>
-        <Text style={styles.actionHint}>Edit, save, and move org blocks without leaving the rendered document.</Text>
+        <TouchableOpacity style={styles.searchPill} activeOpacity={0.85} onPress={() => setSelectedPath(null)}>
+          <Text style={styles.searchText} testID="org-library-title">Search Keep</Text>
+          <Text style={styles.searchIcon}>▭</Text>
+          <Text style={styles.searchIcon}>↕</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.avatarButton} onPress={onRefreshDocuments} testID="refresh-notes">
+          <Text style={styles.avatarText}>P</Text>
+        </TouchableOpacity>
       </View>
 
-      {showDocument && (
-        <ScrollView testID="document-scroll" style={styles.documentScroll} contentContainerStyle={{ paddingBottom: 48 }}>
-          {documentQuery.isFetching && <ActivityIndicator style={{ marginVertical: 24 }} color="#4C6EF5" />}
-          {!documentQuery.isFetching && documentQuery.data && blocks.length > 0 && (
-            <View style={styles.blocksContainer}>
-              {blocks.map((block) => {
-                const isEditing = editingBlockId === block.id;
-                return (
-                  <View
-                    key={block.id}
-                    testID={`org-block-card-${block.node.type}-${block.node.line_start}`}
-                    style={[styles.blockCard, block.node.type === 'heading' && styles.headingCard]}
-                  >
-                    <View style={styles.blockToolbar}>
-                      <Text style={styles.blockType}>{block.node.type.replace('_', ' ')}</Text>
-                      <View style={styles.blockActions}>
-                        <TouchableOpacity testID={`block-move-up-${block.node.line_start}`} onPress={() => moveBlock(block, -1)} style={styles.smallAction}>
-                          <Text style={styles.smallActionText}>↑</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity testID={`block-move-down-${block.node.line_start}`} onPress={() => moveBlock(block, 1)} style={styles.smallAction}>
-                          <Text style={styles.smallActionText}>↓</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity testID={`block-edit-${block.node.line_start}`} onPress={() => startEditing(block)} style={styles.smallAction}>
-                          <Text style={styles.smallActionText}>Edit</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                    {isEditing ? (
-                      <View>
-                        <TextInput
-                          testID="block-editor"
-                          style={styles.blockEditor}
-                          value={draftRaw}
-                          onChangeText={setDraftRaw}
-                          multiline
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                        />
-                        <View style={styles.editActions}>
-                          <TouchableOpacity style={styles.cancelButton} onPress={() => setEditingBlockId(null)}>
-                            <Text style={styles.cancelText}>Cancel</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity testID="block-save" style={styles.saveButton} onPress={() => saveBlockEdit(block)}>
-                            <Text style={styles.saveText}>Save</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    ) : (
-                      <SlateDocument value={block.descendants} />
-                    )}
-                  </View>
-                );
-              })}
+      {!selectedPath ? (
+        <View style={styles.gridScreen}>
+          <View style={styles.gridMetaRow}>
+            <Text style={styles.gridMeta}>Local Org · {documentsQuery.data?.length ?? 0} notes</Text>
+            {interactionStatus && <Text style={styles.latencyText}>{interactionStatus}</Text>}
+          </View>
+          <FlatList
+            key={`notes-${numColumns}`}
+            testID="document-chip-list"
+            data={noteGrid.value}
+            numColumns={numColumns}
+            keyExtractor={(item) => item.doc.path}
+            columnWrapperStyle={numColumns > 1 ? styles.columnWrapper : undefined}
+            contentContainerStyle={styles.noteGrid}
+            ListEmptyComponent={() => (
+              <View style={styles.emptyDocs}>
+                <Text style={styles.emptyDocsText}>Add an Org root from the menu to see notes.</Text>
+              </View>
+            )}
+            renderItem={renderNoteCard}
+          />
+          <TouchableOpacity testID="capture-fab" style={styles.fab} onPress={() => router.push('/capture')}>
+            <Text style={styles.fabText}>＋</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.editorScreen}>
+          <View style={styles.documentTopBar}>
+            <TouchableOpacity onPress={() => setSelectedPath(null)} style={styles.backButton} testID="back-to-notes">
+              <Text style={styles.backButtonText}>‹ Notes</Text>
+            </TouchableOpacity>
+            <View style={styles.editorTitleBlock}>
+              <Text style={styles.editorTitle} numberOfLines={1}>{selectedName}</Text>
+              {interactionStatus && <Text style={styles.latencyText}>{interactionStatus}</Text>}
             </View>
+          </View>
+
+          <View style={styles.switchRow}>
+            <View style={styles.switchItem}>
+              <Text style={styles.switchLabel}>Reader</Text>
+              <Switch value={readerMode} onValueChange={setReaderMode} />
+            </View>
+            <View style={styles.switchItem}>
+              <Text style={styles.switchLabel}>Outline</Text>
+              <Switch value={outlineOnly} onValueChange={setOutlineOnly} />
+            </View>
+            <TouchableOpacity style={styles.actionButton} onPress={() => setShowDocument((v) => !v)}>
+              <Text style={styles.actionButtonText}>{showDocument ? 'Hide' : 'Show'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {showDocument && (
+            <ScrollView testID="document-scroll" style={styles.documentScroll} contentContainerStyle={{ paddingBottom: 48 }}>
+              {documentQuery.isFetching && <ActivityIndicator style={{ marginVertical: 24 }} color="#AFC0FF" />}
+              {!documentQuery.isFetching && documentQuery.data && blocks.length > 0 && (
+                <View style={styles.blocksContainer}>
+                  {blocks.map((block) => {
+                    const isEditing = editingBlockId === block.id;
+                    return (
+                      <View
+                        key={block.id}
+                        testID={`org-block-card-${block.node.type}-${block.node.line_start}`}
+                        style={[styles.blockCard, block.node.type === 'heading' && styles.headingCard]}
+                      >
+                        <View style={styles.blockToolbar}>
+                          <Text style={styles.blockType}>{block.node.type.replace('_', ' ')}</Text>
+                          <View style={styles.blockActions}>
+                            <TouchableOpacity testID={`block-move-up-${block.node.line_start}`} onPress={() => moveBlock(block, -1)} style={styles.smallAction}>
+                              <Text style={styles.smallActionText}>↑</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity testID={`block-move-down-${block.node.line_start}`} onPress={() => moveBlock(block, 1)} style={styles.smallAction}>
+                              <Text style={styles.smallActionText}>↓</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity testID={`block-edit-${block.node.line_start}`} onPress={() => startEditing(block)} style={styles.smallAction}>
+                              <Text style={styles.smallActionText}>Edit</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                        {isEditing ? (
+                          <View>
+                            <TextInput
+                              testID="block-editor"
+                              style={styles.blockEditor}
+                              value={draftRaw}
+                              onChangeText={setDraftRaw}
+                              multiline
+                              autoCapitalize="none"
+                              autoCorrect={false}
+                            />
+                            <View style={styles.editActions}>
+                              <TouchableOpacity style={styles.cancelButton} onPress={() => setEditingBlockId(null)}>
+                                <Text style={styles.cancelText}>Cancel</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity testID="block-save" style={styles.saveButton} onPress={() => saveBlockEdit(block)}>
+                                <Text style={styles.saveText}>Save</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        ) : (
+                          <SlateDocument value={block.descendants} />
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+              {!documentQuery.isFetching && (!documentQuery.data || blocks.length === 0) && (
+                <Text style={styles.emptyDocument}>Select an Org file to view its contents.</Text>
+              )}
+            </ScrollView>
           )}
-          {!documentQuery.isFetching && (!documentQuery.data || blocks.length === 0) && (
-            <Text style={styles.emptyDocument}>Select an Org file to view its contents.</Text>
-          )}
-        </ScrollView>
+        </View>
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#101214' },
-  statusBar: {
+  container: { flex: 1, backgroundColor: '#111217' },
+  keepHeader: {
+    paddingTop: 18,
     paddingHorizontal: 16,
-    paddingVertical: 20,
+    paddingBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: '#111217'
+  },
+  iconButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
+  menuIcon: { color: '#D7D9E3', fontSize: 34, lineHeight: 38 },
+  searchPill: {
+    flex: 1,
+    minHeight: 58,
+    borderRadius: 32,
+    backgroundColor: '#2A2C36',
+    paddingHorizontal: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 20
+  },
+  searchText: { flex: 1, color: '#B5B6C2', fontSize: 30, fontWeight: '400' },
+  searchIcon: { color: '#BFC2CF', fontSize: 30, fontWeight: '700' },
+  avatarButton: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    borderWidth: 4,
+    borderColor: '#5B8DEF',
+    backgroundColor: '#242B35',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  avatarText: { color: '#F3F5FF', fontWeight: '800', fontSize: 22 },
+  gridScreen: { flex: 1 },
+  gridMetaRow: { paddingHorizontal: 22, paddingBottom: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  gridMeta: { color: '#8C8F9D', fontSize: 13 },
+  latencyText: { color: '#9AA0AE', fontSize: 11 },
+  noteGrid: { paddingHorizontal: 20, paddingBottom: 120 },
+  columnWrapper: { gap: 20, alignItems: 'flex-start' },
+  noteCard: {
+    flex: 1,
+    backgroundColor: '#101116',
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: '#424550',
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 20,
+    marginBottom: 20,
+    minHeight: 164
+  },
+  noteTitle: { color: '#ECEEF8', fontSize: 27, fontWeight: '800', marginBottom: 18 },
+  previewLines: { gap: 10 },
+  previewLine: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  checkbox: { width: 21, height: 21, borderRadius: 3, borderWidth: 2.5, borderColor: '#9A9DA8', marginTop: 3 },
+  checkboxChecked: { backgroundColor: '#AEB4C8', borderColor: '#AEB4C8' },
+  previewText: { flex: 1, color: '#E3E6F0', fontSize: 23, lineHeight: 30 },
+  previewCheckedText: { color: '#8E929D', textDecorationLine: 'line-through' },
+  checkedSummary: { color: '#8C8F9A', fontSize: 19, marginTop: 20, marginLeft: 32 },
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 },
+  tagChip: { color: '#C7CBE0', backgroundColor: '#2D3039', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, fontSize: 12 },
+  emptyDocs: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  emptyDocsText: { color: '#858A98', fontSize: 16 },
+  fab: {
+    position: 'absolute',
+    right: 28,
+    bottom: 34,
+    width: 92,
+    height: 92,
+    borderRadius: 28,
+    backgroundColor: '#B8C6F4',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  fabText: { color: '#202234', fontSize: 52, lineHeight: 58, fontWeight: '300' },
+  editorScreen: { flex: 1, backgroundColor: '#101116' },
+  documentTopBar: {
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.08)'
+    borderColor: 'rgba(255,255,255,0.08)',
+    gap: 14
   },
-  statusTitle: { fontSize: 20, color: '#F4F7FE', fontWeight: '600' },
-  statusRow: { marginTop: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  statusPill: {
-    backgroundColor: '#1D2331',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    color: '#97A0B8',
-    fontSize: 12
-  },
-  refreshButton: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, backgroundColor: '#273047' },
-  refreshText: { color: '#C7CFE4', fontSize: 12 },
+  backButton: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, backgroundColor: '#252832' },
+  backButtonText: { color: '#EEF1FA', fontSize: 16, fontWeight: '700' },
+  editorTitleBlock: { flex: 1 },
+  editorTitle: { color: '#F2F4FC', fontSize: 18, fontWeight: '800' },
   switchRow: {
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -394,51 +462,13 @@ const styles = StyleSheet.create({
   },
   switchItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   switchLabel: { color: '#D8DCEE' },
-  latencyText: { color: '#6EE7B7', fontSize: 11 },
-  rootManager: { paddingHorizontal: 16, paddingVertical: 20 },
-  sectionHeading: { color: '#8F98B2', fontSize: 12, marginBottom: 8, textTransform: 'uppercase' },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap' },
-  rootChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1F2430',
-    borderRadius: 14,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    marginRight: 8,
-    marginBottom: 8
-  },
-  rootChipText: { color: '#E4E8F5', marginRight: 6 },
-  removeChipBtn: { width: 18, height: 18, borderRadius: 9, backgroundColor: '#303546', alignItems: 'center', justifyContent: 'center' },
-  removeChipText: { color: '#F87171', fontWeight: '700' },
-  inputRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
-  pathInput: { flex: 1, backgroundColor: '#191D27', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: '#EEF1FB' },
-  addButton: { backgroundColor: '#4C6EF5', paddingVertical: 10, paddingHorizontal: 18, borderRadius: 10, marginLeft: 12 },
-  addButtonText: { color: '#FFFFFF', fontWeight: '600' },
-  pickerButton: { marginTop: 8, backgroundColor: '#273047', paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
-  pickerText: { color: '#C7CFE4', fontWeight: '600' },
-  pickerStatus: { marginTop: 8, color: '#6E7588' },
-  docList: { paddingHorizontal: 16, paddingVertical: 12 },
-  docChip: { borderRadius: 12, borderWidth: 1, borderColor: '#1F2430', paddingVertical: 10, paddingHorizontal: 16, marginRight: 12 },
-  docChipSelected: { backgroundColor: '#1F2430', borderColor: '#4C6EF5' },
-  docChipText: { color: '#D8DEEF', fontSize: 14 },
-  emptyDocs: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  emptyDocsText: { color: '#6E7588' },
-  documentScroll: { flex: 1, backgroundColor: '#0E1118' },
-  actionsRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.05)'
-  },
-  actionButton: { backgroundColor: '#364180', paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
-  actionButtonText: { color: '#F0F2FC', fontWeight: '600' },
-  actionHint: { marginTop: 8, color: '#77809A', fontSize: 12 },
+  actionButton: { backgroundColor: '#30333E', paddingVertical: 9, paddingHorizontal: 14, borderRadius: 12, alignItems: 'center' },
+  actionButtonText: { color: '#F0F2FC', fontWeight: '700' },
+  documentScroll: { flex: 1, backgroundColor: '#0E0F14' },
   blocksContainer: { padding: 12 },
-  blockCard: { backgroundColor: '#181C24', borderRadius: 16, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
-  headingCard: { borderColor: 'rgba(76,110,245,0.42)', backgroundColor: '#151A2A' },
-  blockToolbar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  blockCard: { backgroundColor: '#181A21', borderRadius: 18, padding: 12, marginBottom: 12, borderWidth: 1.5, borderColor: '#3C404B' },
+  headingCard: { borderColor: '#575B6A', backgroundColor: '#14161D' },
+  blockToolbar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   blockType: { color: '#8F98B2', fontSize: 11, textTransform: 'uppercase' },
   blockActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   smallAction: { backgroundColor: '#252B3B', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5 },
