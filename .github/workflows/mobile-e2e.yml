@@ -28,7 +28,7 @@ jobs:
 
       - name: Install Playwright browser
         working-directory: apps/mobile
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: Typecheck mobile app
         working-directory: apps/mobile
