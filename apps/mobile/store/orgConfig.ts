@@ -11,7 +11,7 @@ interface OrgConfigState {
   reset(): void;
 }
 
-const isE2E = isE2EMode();
+const isE2E = process.env.EXPO_PUBLIC_POSTEP_E2E === '1' || isE2EMode();
 const initialRoots = isE2E ? [E2E_ORG_ROOT] : [];
 
 const syncNative = (roots: string[], roamRoots: string[]) => {

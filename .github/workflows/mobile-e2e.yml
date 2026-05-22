@@ -5,14 +5,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  android-maestro:
+  launched-web-e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 20
     env:
       EXPO_PUBLIC_POSTEP_E2E: "1"
       CI: "1"
-      JAVA_OPTS: "-Dsun.net.client.defaultConnectTimeout=60000 -Dsun.net.client.defaultReadTimeout=60000"
-      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g -Dsun.net.client.defaultConnectTimeout=60000 -Dsun.net.client.defaultReadTimeout=60000"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,47 +22,20 @@ jobs:
           cache: npm
           cache-dependency-path: apps/mobile/package-lock.json
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Maestro
-        run: |
-          curl -Ls "https://get.maestro.mobile.dev" | bash
-          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
-
       - name: Install mobile dependencies
         working-directory: apps/mobile
         run: npm ci --legacy-peer-deps
+
+      - name: Install Playwright browser
+        working-directory: apps/mobile
+        run: npx playwright install --with-deps chromium
 
       - name: Typecheck mobile app
         working-directory: apps/mobile
         run: npm run typecheck
 
-      - name: Generate Android project
+      - name: Run launched UI workflow
         working-directory: apps/mobile
-        run: npm run e2e:android:prebuild
-
-      - name: Cache Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Build Android debug APK
-        working-directory: apps/mobile
-        run: npm run e2e:android:build
-
-      - name: Run Maestro Android E2E
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          target: default
-          arch: x86_64
-          profile: Nexus 6
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          disable-animations: true
-          script: |
-            bash apps/mobile/e2e/run-android-maestro.sh
+        run: |
+          npm run e2e:web:build
+          npm run e2e:web
