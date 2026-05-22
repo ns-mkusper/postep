@@ -61,6 +61,22 @@ export interface SetAgendaStatusParams {
   status: string;
 }
 
+export interface AddHabitRequest {
+  roots: string[];
+  roamRoots?: string[];
+  targetPath?: string;
+  title: string;
+  scheduled: string;
+  repeater?: string;
+}
+
+export interface DeleteHabitRequest {
+  roots: string[];
+  roamRoots?: string[];
+  path: string;
+  title: string;
+}
+
 export interface RoamGraph {
   nodes: Array<{
     id: string;
@@ -359,6 +375,53 @@ export function setAgendaStatus(params: SetAgendaStatusParams): AgendaSnapshot {
   return normalizeAgendaSnapshot(raw);
 }
 
+export function addHabit(request: AddHabitRequest): AgendaSnapshot {
+  if (request.roots.length === 0) {
+    throw new Error('No Org roots configured');
+  }
+  const targetPath = request.targetPath ?? 'habits.org';
+  const repeater = request.repeater ?? '+1d';
+  const content = `* TODO ${request.title}\nSCHEDULED: <${request.scheduled} ${repeater}>\n:PROPERTIES:\n:STYLE: habit\n:END:\n`;
+  return appendCaptureEntry({
+    roots: request.roots,
+    roamRoots: request.roamRoots,
+    targetPath,
+    content
+  });
+}
+
+export function deleteHabit(request: DeleteHabitRequest): AgendaSnapshot {
+  if (request.roots.length === 0) {
+    throw new Error('No Org roots configured');
+  }
+  const doc = loadDocument({ roots: request.roots, roamRoots: request.roamRoots }, request.path);
+  const nextRaw = removeHabitBlock(doc.raw, request.title);
+  updateDocument({
+    roots: request.roots,
+    roamRoots: request.roamRoots,
+    path: request.path,
+    raw: nextRaw
+  });
+  return loadAgendaSnapshot({ roots: request.roots, roamRoots: request.roamRoots });
+}
+
+function removeHabitBlock(raw: string, title: string): string {
+  const lines = raw.split('\n');
+  const start = lines.findIndex((line) => line.startsWith('*') && line.includes(title));
+  if (start < 0) {
+    return raw;
+  }
+  let end = lines.length;
+  for (let idx = start + 1; idx < lines.length; idx += 1) {
+    if (/^\*+\s+/.test(lines[idx])) {
+      end = idx;
+      break;
+    }
+  }
+  lines.splice(start, end - start);
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
 function normalizeAgendaSnapshot(snapshot: AgendaSnapshot): AgendaSnapshot {
   return {
     items: (snapshot.items ?? []).map(normalizeAgendaItem),
@@ -411,6 +474,7 @@ SCHEDULED: <2026-05-${day} Thu 06:30 +1d>
 * WAITING Agenda item ${index} :agenda:
 DEADLINE: <2026-06-${day} Mon 09:00>
 Common agenda text for full launched UI automation ${index}.
+[[sample-${String(index === 10 ? 1 : index + 1).padStart(2, '0')}]]
 
 * Notes ${index}
 | Metric | Budget |
@@ -437,7 +501,7 @@ const e2eNativeModule: NativeModule = {
     e2eDocs.set(path, `${previous}${previous.endsWith('\n') || previous.length === 0 ? '' : '\n'}${content}\n`);
     return buildE2EAgendaSnapshot();
   },
-  load_roam_graph: () => ({ nodes: [], links: [] }),
+  load_roam_graph: () => buildE2ERoamGraph(),
   list_documents: () => {
     ensureE2EDocs();
     return [...e2eDocs.keys()].sort();
@@ -461,6 +525,26 @@ function loadE2EDocument(path: string): DocumentPayload {
   ensureE2EDocs();
   const raw = e2eDocs.get(path) ?? '';
   return { path, raw, slate: rawToSlate(raw) };
+}
+
+function buildE2ERoamGraph(): RoamGraph {
+  ensureE2EDocs();
+  const nodes = [...e2eDocs.keys()].map((path) => {
+    const id = path.split('/').pop()?.replace(/\.org$/, '') ?? path;
+    const raw = e2eDocs.get(path) ?? '';
+    const title = raw.match(/^#\+TITLE:\s*(.*)$/m)?.[1] ?? id;
+    const tags = [...raw.matchAll(/:([A-Za-z0-9_@#%:]+):/g)].flatMap((match) => match[1].split(':').filter(Boolean));
+    return { id, title, path, tags: [...new Set(tags)] };
+  });
+  const knownIds = new Set(nodes.map((node) => node.id));
+  const links = [...e2eDocs.entries()].flatMap(([path, raw]) => {
+    const source = path.split('/').pop()?.replace(/\.org$/, '') ?? path;
+    return [...raw.matchAll(/\[\[([^\]]+)\]\]/g)]
+      .map((match) => match[1])
+      .filter((target) => knownIds.has(target))
+      .map((target) => ({ source, target }));
+  });
+  return { nodes, links };
 }
 
 function buildE2EAgendaSnapshot(): AgendaSnapshot {

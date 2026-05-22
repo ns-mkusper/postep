@@ -34,4 +34,15 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
   await page.goto('/habits');
   await expect(page.getByTestId('habits-list')).toBeVisible();
   await expect(page.getByText('TODO Morning habit 1', { exact: true })).toBeVisible();
+  await page.getByTestId('habit-title-input').fill('Hydrate');
+  await page.getByTestId('habit-add-button').click();
+  await expect(page.getByText('TODO Hydrate')).toBeVisible();
+
+  await page.goto('/roam');
+  await expect(page.getByTestId('roam-screen')).toBeVisible();
+  await expect(page.getByTestId('roam-graph-mode')).toBeVisible();
+  await page.getByTestId('roam-mode-tags').click();
+  await expect(page.getByTestId('roam-tags-mode')).toBeVisible();
+  await page.getByTestId('roam-mode-backlinks').click();
+  await expect(page.getByTestId('roam-backlinks-mode')).toBeVisible();
 });

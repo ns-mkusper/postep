@@ -13,6 +13,7 @@ interface OrgConfigState {
 
 const isE2E = process.env.EXPO_PUBLIC_POSTEP_E2E === '1' || isE2EMode();
 const initialRoots = isE2E ? [E2E_ORG_ROOT] : [];
+const initialRoamRoots = isE2E ? [E2E_ORG_ROOT] : [];
 
 const syncNative = (roots: string[], roamRoots: string[]) => {
   setRoots({ roots, ...(roamRoots.length > 0 ? { roamRoots } : {}) });
@@ -21,7 +22,7 @@ const syncNative = (roots: string[], roamRoots: string[]) => {
 
 export const useOrgConfig = create<OrgConfigState>((set) => ({
   roots: initialRoots,
-  roamRoots: [],
+  roamRoots: initialRoamRoots,
   addRoot: (path: string) =>
     set((state) => {
       const trimmed = path.trim();
