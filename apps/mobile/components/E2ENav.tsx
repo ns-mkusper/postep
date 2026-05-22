@@ -1,7 +1,14 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { router } from 'expo-router';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Link } from 'expo-router';
 import { isE2EMode } from '@postep/bridge';
+
+const navItems = [
+  { href: '/library', label: 'Documents', testID: 'e2e-nav-documents' },
+  { href: '/agenda', label: 'Agenda', testID: 'e2e-nav-agenda' },
+  { href: '/habits', label: 'Habits', testID: 'e2e-nav-habits' },
+  { href: '/roam', label: 'Roam', testID: 'e2e-nav-roam' }
+] as const;
 
 export function E2ENav() {
   const isE2E = process.env.EXPO_PUBLIC_POSTEP_E2E === '1' || isE2EMode();
@@ -11,15 +18,13 @@ export function E2ENav() {
 
   return (
     <View style={styles.container} testID="e2e-nav">
-      <TouchableOpacity testID="e2e-nav-documents" style={styles.button} onPress={() => router.replace('/library')}>
-        <Text style={styles.text}>E2E Documents</Text>
-      </TouchableOpacity>
-      <TouchableOpacity testID="e2e-nav-agenda" style={styles.button} onPress={() => router.replace('/agenda')}>
-        <Text style={styles.text}>E2E Agenda</Text>
-      </TouchableOpacity>
-      <TouchableOpacity testID="e2e-nav-habits" style={styles.button} onPress={() => router.replace('/habits')}>
-        <Text style={styles.text}>E2E Habits</Text>
-      </TouchableOpacity>
+      {navItems.map((item) => (
+        <Link key={item.href} href={item.href} asChild>
+          <Pressable testID={item.testID} style={styles.button}>
+            <Text style={styles.text}>{item.label}</Text>
+          </Pressable>
+        </Link>
+      ))}
     </View>
   );
 }
