@@ -1,10 +1,59 @@
-name: mobile-e2e
+name: mobile-ui-automation
 
 on:
   pull_request:
   workflow_dispatch:
 
 jobs:
+  android-native-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EXPO_PUBLIC_POSTEP_E2E: "1"
+      CI: "1"
+      JAVA_OPTS: "-Dsun.net.client.defaultConnectTimeout=60000 -Dsun.net.client.defaultReadTimeout=60000"
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g -Dsun.net.client.defaultConnectTimeout=60000 -Dsun.net.client.defaultReadTimeout=60000"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install mobile dependencies
+        working-directory: apps/mobile
+        run: npm ci --legacy-peer-deps
+
+      - name: Generate Android native project
+        working-directory: apps/mobile
+        run: npm run e2e:android:prebuild
+
+      - name: Cache Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build Android debug APK
+        working-directory: apps/mobile
+        run: npm run e2e:android:build
+
+      - name: Verify APK artifact
+        working-directory: apps/mobile
+        run: |
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          ls -lh android/app/build/outputs/apk/debug/app-debug.apk
+
   launched-web-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -33,6 +82,10 @@ jobs:
       - name: Typecheck mobile app
         working-directory: apps/mobile
         run: npm run typecheck
+
+      - name: Run tight UX interaction budgets
+        working-directory: apps/mobile
+        run: npm run test:ux
 
       - name: Run launched UI workflow
         working-directory: apps/mobile
