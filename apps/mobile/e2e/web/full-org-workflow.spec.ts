@@ -40,7 +40,7 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
 
   await page.goto('/agenda');
   await expect(page.getByTestId('agenda-screen')).toBeVisible();
-  await expect(page.getByText('Agenda item 1')).toBeVisible();
+  await expect(page.getByText('Agenda item 1', { exact: true })).toBeVisible();
   await screenshot(page, '04-agenda-loaded');
 
   await page.goto('/habits');

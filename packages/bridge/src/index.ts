@@ -552,39 +552,45 @@ function buildE2EAgendaSnapshot(): AgendaSnapshot {
   const items: AgendaItem[] = [];
   const habits: Habit[] = [];
   for (const [path, raw] of e2eDocs) {
-    const lines = raw.split('\n');
-    for (let idx = 0; idx < lines.length; idx += 1) {
-      const heading = parseHeading(lines[idx]);
-      if (!heading) {
-        continue;
-      }
-      const nextHeading = findNextHeading(lines, idx + 1);
-      const body = lines.slice(idx + 1, nextHeading).join('\n');
-      const scheduled = body.match(/SCHEDULED:\s+<([^>]+)>/);
-      const deadline = body.match(/DEADLINE:\s+<([^>]+)>/);
-      const styleHabit = /:STYLE:\s*habit/i.test(body);
+    const nodes = rawToSlate(raw);
+    for (const heading of nodes.filter((node): node is Extract<SlateNode, { type: 'heading' }> => node.type === 'heading')) {
+      const nextHeading = nodes.find((node) => node.type === 'heading' && node.line_start > heading.line_start);
+      const bodyNodes = nodes.filter((node) => node.line_start > heading.line_start && (!nextHeading || node.line_start < nextHeading.line_start));
+      const scheduled = bodyNodes.find((node): node is Extract<SlateNode, { type: 'planning' }> => node.type === 'planning' && node.keyword === 'SCHEDULED');
+      const deadline = bodyNodes.find((node): node is Extract<SlateNode, { type: 'planning' }> => node.type === 'planning' && node.keyword === 'DEADLINE');
+      const propertyDrawer = bodyNodes.find((node): node is Extract<SlateNode, { type: 'property_drawer' }> => node.type === 'property_drawer');
+      const styleHabit = propertyDrawer?.properties.STYLE?.toLowerCase() === 'habit';
       const planning = scheduled ?? deadline;
       const kind = scheduled ? 'Scheduled' : deadline ? 'Deadline' : 'Floating';
+      const context = bodyNodes
+        .flatMap((node) => {
+          if (node.type === 'paragraph' || node.type === 'list_item') return [node.text];
+          if (node.type === 'table') return [node.rows.map((row) => row.join(' · ')).join('\n')];
+          return [];
+        })
+        .filter(Boolean)
+        .slice(0, 3)
+        .join('\n');
       items.push({
         title: heading.text,
-        date: planning?.[1]?.slice(0, 10) ?? null,
-        time: planning?.[1]?.match(/\b\d{2}:\d{2}\b/)?.[0] ?? null,
-        context: body.split('\n').filter(Boolean).slice(0, 3).join('\n'),
+        date: planning?.text?.slice(0, 10) ?? null,
+        time: planning?.text?.match(/\b\d{2}:\d{2}\b/)?.[0] ?? null,
+        context,
         path,
-        headline_line: idx,
+        headline_line: heading.line_start,
         todo_keyword: heading.todo_keyword,
         kind,
-        timestamp_raw: planning?.[1] ?? null,
-        repeater: planning?.[1]?.includes('+1d') ? { amount: 1, unit: 'Day' } : null
+        timestamp_raw: planning?.text ?? null,
+        repeater: planning?.text?.includes('+1d') ? { amount: 1, unit: 'Day' } : null
       });
       if (styleHabit) {
         habits.push({
           title: `${heading.todo_keyword ? `${heading.todo_keyword} ` : ''}${heading.text}`,
-          scheduled: scheduled?.[1]?.slice(0, 10) ?? null,
-          description: body.split('\n').filter((line) => line.startsWith('- [')).join('\n'),
+          scheduled: scheduled?.text?.slice(0, 10) ?? null,
+          description: bodyNodes.filter((node) => node.type === 'list_item').map((node) => `- ${node.text}`).join('\n'),
           repeater: { raw: '+1d', frequency: { Daily: 1 } },
-          log_entries: [{ date: scheduled?.[1]?.slice(0, 10) ?? '2026-05-01', state: 'DONE' }],
-          last_repeat: body.match(/:LAST_REPEAT:\s+\[(\d{4}-\d{2}-\d{2})/)?.[1] ?? null
+          log_entries: [{ date: scheduled?.text?.slice(0, 10) ?? '2026-05-01', state: 'DONE' }],
+          last_repeat: propertyDrawer?.properties.LAST_REPEAT?.match(/\[(\d{4}-\d{2}-\d{2})/)?.[1] ?? null
         });
       }
     }

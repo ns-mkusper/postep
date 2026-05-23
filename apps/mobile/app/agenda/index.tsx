@@ -39,6 +39,79 @@ function groupByDay(items: AgendaItem[]) {
   return Object.entries(groups).map(([date, list]) => ({ date, list }));
 }
 
+function cleanOrgText(text: string) {
+  return text
+    .replace(/\[\[([^\]]+)\]\[([^\]]+)\]\]/g, '$2')
+    .replace(/\[\[([^\]]+)\]\]/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanAgendaContext(context: string) {
+  const lines = context.split('\n');
+  const visible: string[] = [];
+  let inDrawer = false;
+  let inCode = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    if (/^:(PROPERTIES|LOGBOOK|[A-Z0-9_+-]+):$/i.test(line)) {
+      inDrawer = true;
+      continue;
+    }
+    if (/^:END:$/i.test(line)) {
+      inDrawer = false;
+      continue;
+    }
+    if (inDrawer) {
+      continue;
+    }
+    if (/^#\+BEGIN_/i.test(line)) {
+      inCode = true;
+      continue;
+    }
+    if (/^#\+END_/i.test(line)) {
+      inCode = false;
+      continue;
+    }
+    if (inCode) {
+      continue;
+    }
+    if (/^(SCHEDULED|DEADLINE|CLOSED):/i.test(line)) {
+      continue;
+    }
+    if (/^:[^:]+:/.test(line)) {
+      continue;
+    }
+    if (/^State ".*" from ".*" \[/.test(line)) {
+      continue;
+    }
+    if (/^\|.*\|$/.test(line)) {
+      visible.push(cleanOrgText(line.replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim()).filter(Boolean).join(' · ')));
+      continue;
+    }
+    visible.push(cleanOrgText(line));
+  }
+
+  return visible.filter(Boolean).slice(0, 3);
+}
+
+function formatRepeater(item: AgendaItem) {
+  if (!item.repeater) {
+    return null;
+  }
+  const unit = item.repeater.unit.toLowerCase();
+  return `Every ${item.repeater.amount} ${unit}${item.repeater.amount === 1 ? '' : 's'}`;
+}
+
+function formatScheduleLabel(item: AgendaItem) {
+  const parts = [item.date, item.time].filter(Boolean);
+  return parts.length > 0 ? parts.join(' ') : item.kind;
+}
+
 export default function AgendaScreen() {
   const queryClient = useQueryClient();
   const config = useBridgeConfig();
@@ -94,21 +167,34 @@ export default function AgendaScreen() {
         renderItem={({ item }) => (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{item.date === 'unscheduled' ? 'Inbox' : item.date}</Text>
-            {item.list.map((agenda) => (
-              <View key={`${agenda.path}:${agenda.headline_line}`} testID={`agenda-card-${agenda.headline_line}`} style={styles.cardRow}>
-                <TouchableOpacity
-                  style={styles.statusButton}
-                  onPress={() => setPickerItem(agenda)}
-                  testID={`agenda-status-${agenda.headline_line}`}
-                >
-                  <Text style={styles.statusButtonText}>{currentStatusLabel(agenda)}</Text>
-                </TouchableOpacity>
-                <View style={styles.cardBody}>
+            {item.list.map((agenda) => {
+              const contextLines = cleanAgendaContext(agenda.context);
+              const repeater = formatRepeater(agenda);
+              return (
+                <View key={`${agenda.path}:${agenda.headline_line}`} testID={`agenda-card-${agenda.headline_line}`} style={styles.cardRow}>
+                  <View style={styles.cardHeaderRow}>
+                    <TouchableOpacity
+                      style={styles.statusChip}
+                      onPress={() => setPickerItem(agenda)}
+                      testID={`agenda-status-${agenda.headline_line}`}
+                    >
+                      <Text style={styles.statusChipText}>{currentStatusLabel(agenda)}</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.kindChip}>{agenda.kind}</Text>
+                    <Text style={styles.dateChip}>{formatScheduleLabel(agenda)}</Text>
+                    {repeater && <Text style={styles.repeaterChip}>{repeater}</Text>}
+                  </View>
                   <Text style={styles.cardTitle}>{agenda.title}</Text>
-                  <Text style={styles.cardMeta}>{agenda.context}</Text>
+                  {contextLines.length > 0 && (
+                    <View style={styles.contextBlock}>
+                      {contextLines.map((line, index) => (
+                        <Text key={`${line}:${index}`} style={styles.cardMeta}>{line}</Text>
+                      ))}
+                    </View>
+                  )}
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         )}
         ListEmptyComponent={() => (
@@ -163,38 +249,77 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#7A8499',
     textTransform: 'uppercase',
-    marginBottom: 12
+    marginBottom: 12,
+    fontWeight: '800'
   },
   cardRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
     marginBottom: 12,
     backgroundColor: '#1A1D23',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#303541',
+    padding: 16
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+    alignItems: 'center'
+  },
+  statusChip: {
+    backgroundColor: '#B8C6F4',
     borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6
+  },
+  statusChipText: {
+    color: '#111217',
+    fontWeight: '900',
+    fontSize: 12
+  },
+  kindChip: {
+    color: '#DCE3F7',
+    backgroundColor: '#283044',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 12,
+    overflow: 'hidden',
+    fontWeight: '800'
+  },
+  dateChip: {
+    color: '#C9D3EF',
+    backgroundColor: '#222838',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 12,
     overflow: 'hidden'
   },
-  statusButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 18,
-    backgroundColor: '#2B3347',
-    justifyContent: 'center'
-  },
-  statusButtonText: {
-    color: '#F4F6FF',
-    fontWeight: '600'
-  },
-  cardBody: {
-    flex: 1,
-    padding: 16
+  repeaterChip: {
+    color: '#BDF7D3',
+    backgroundColor: '#173828',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 12,
+    overflow: 'hidden',
+    fontWeight: '800'
   },
   cardTitle: {
     color: '#F3F4F8',
-    fontSize: 16,
-    marginBottom: 6
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 8
+  },
+  contextBlock: {
+    gap: 4
   },
   cardMeta: {
-    color: '#8891AA',
-    fontSize: 12
+    color: '#AAB1C4',
+    fontSize: 14,
+    lineHeight: 20
   },
   empty: {
     flex: 1,
