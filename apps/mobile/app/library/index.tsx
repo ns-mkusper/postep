@@ -453,50 +453,70 @@ export default function LibraryScreen() {
     toggleChecklistItem(path, lineStart);
   };
 
-  const renderNoteCard = ({ item }: { item: NotePreview }) => (
-    <TouchableOpacity
-      style={styles.noteCard}
-      onPress={() => setSelectedPath(item.doc.path)}
-      testID={`document-card-${item.doc.name}`}
-      activeOpacity={0.78}
-    >
-      <Text style={styles.noteTitle}>{item.title}</Text>
-      <View style={styles.metadataRow}>
-        {item.metadata.todo && <Text style={styles.todoChip}>{item.metadata.todo}</Text>}
-        {item.metadata.priority && <Text style={styles.priorityChip}>#{item.metadata.priority}</Text>}
-        {item.metadata.habit && <Text style={styles.habitChip}>Habit</Text>}
-        {item.metadata.scheduled && <Text style={styles.metaChip}>Scheduled {item.metadata.scheduled}</Text>}
-        {item.metadata.deadline && <Text style={styles.deadlineChip}>Due {item.metadata.deadline}</Text>}
-      </View>
-      <View style={styles.previewLines}>
-        {item.lines.map((line, index) => (
-          <View key={`${line.text}:${index}`} style={styles.previewLine}>
-            {line.kind === 'list' ? (
-              <TouchableOpacity
-                testID={`note-checkbox-${item.doc.name}-${line.lineStart ?? index}`}
-                onPress={(event) => handleChecklistPress(event, item.doc.path, line.lineStart)}
-                style={[styles.checkbox, line.checked && styles.checkboxChecked]}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: Boolean(line.checked) }}
-              />
-            ) : (
-              <View style={styles.previewBullet} />
-            )}
-            <Text numberOfLines={index > 3 ? 1 : 2} style={[styles.previewText, line.checked && styles.previewCheckedText]}>
+  const openNote = (path: string) => setSelectedPath(path);
+
+  const renderPreviewLine = (item: NotePreview, line: NoteLine, index: number) => {
+    if (line.kind === 'list') {
+      return (
+        <View key={`${line.text}:${index}`} style={styles.previewLine}>
+          <TouchableOpacity
+            testID={`note-checkbox-${item.doc.name}-${line.lineStart ?? index}`}
+            onPress={(event) => handleChecklistPress(event, item.doc.path, line.lineStart)}
+            style={[styles.checkbox, line.checked && styles.checkboxChecked]}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: Boolean(line.checked) }}
+          />
+          <TouchableOpacity style={styles.previewTextButton} onPress={() => openNote(item.doc.path)} activeOpacity={0.75}>
+            <Text numberOfLines={index > 3 ? 1 : 3} style={[styles.previewText, line.checked && styles.previewCheckedText]}>
               {line.text}
             </Text>
-          </View>
-        ))}
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return (
+      <TouchableOpacity
+        key={`${line.text}:${index}`}
+        style={[styles.previewLine, line.kind === 'heading' && styles.previewHeadingLine]}
+        onPress={() => openNote(item.doc.path)}
+        activeOpacity={0.75}
+      >
+        <View style={line.kind === 'heading' ? styles.previewHeadingSpacer : styles.previewBullet} />
+        <Text numberOfLines={index > 3 ? 1 : 2} style={[styles.previewText, line.kind === 'heading' && styles.previewHeadingText]}>
+          {line.text}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderNoteCard = ({ item }: { item: NotePreview }) => (
+    <View
+      style={styles.noteCard}
+      testID={`document-card-${item.doc.name}`}
+    >
+      <TouchableOpacity onPress={() => openNote(item.doc.path)} activeOpacity={0.78}>
+        <Text style={styles.noteTitle}>{item.title}</Text>
+        <View style={styles.metadataRow}>
+          {item.metadata.todo && <Text style={styles.todoChip}>{item.metadata.todo}</Text>}
+          {item.metadata.priority && <Text style={styles.priorityChip}>#{item.metadata.priority}</Text>}
+          {item.metadata.habit && <Text style={styles.habitChip}>Habit</Text>}
+          {item.metadata.scheduled && <Text style={styles.metaChip}>Scheduled {item.metadata.scheduled}</Text>}
+          {item.metadata.deadline && <Text style={styles.deadlineChip}>Due {item.metadata.deadline}</Text>}
+        </View>
+      </TouchableOpacity>
+      <View style={styles.previewLines}>
+        {item.lines.map((line, index) => renderPreviewLine(item, line, index))}
       </View>
       {item.checkedCount > 0 && <Text style={styles.checkedSummary}>+ {item.checkedCount} checked items</Text>}
       {item.tags.length > 0 && (
-        <View style={styles.tagRow}>
+        <TouchableOpacity style={styles.tagRow} onPress={() => openNote(item.doc.path)} activeOpacity={0.78}>
           {item.tags.map((tag) => (
             <Text key={tag} style={styles.tagChip}>#{tag}</Text>
           ))}
-        </View>
+        </TouchableOpacity>
       )}
-    </TouchableOpacity>
+    </View>
   );
 
   return (
@@ -695,10 +715,14 @@ const styles = StyleSheet.create({
   deadlineChip: { color: '#FFD0D0', backgroundColor: '#3B2024', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, fontSize: 12, fontWeight: '800', overflow: 'hidden' },
   previewLines: { gap: 10 },
   previewLine: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  previewHeadingLine: { marginTop: 12 },
+  previewTextButton: { flex: 1 },
   checkbox: { width: 21, height: 21, borderRadius: 3, borderWidth: 2.5, borderColor: '#9A9DA8', marginTop: 3 },
   previewBullet: { width: 21, height: 21, marginTop: 3, alignItems: 'center', justifyContent: 'center' },
+  previewHeadingSpacer: { width: 21, height: 21, marginTop: 3 },
   checkboxChecked: { backgroundColor: '#AEB4C8', borderColor: '#AEB4C8' },
   previewText: { flex: 1, color: '#E3E6F0', fontSize: 23, lineHeight: 30 },
+  previewHeadingText: { fontWeight: '700', color: '#F0F2FA' },
   previewCheckedText: { color: '#8E929D', textDecorationLine: 'line-through' },
   checkedSummary: { color: '#8C8F9A', fontSize: 19, marginTop: 20, marginLeft: 32 },
   tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 },
