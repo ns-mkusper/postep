@@ -521,12 +521,12 @@ export default function LibraryScreen() {
 
   return (
     <View style={styles.container} testID="documents-screen">
-      <View style={styles.keepHeader}>
+      <View style={styles.postepHeader}>
         <TouchableOpacity testID="hamburger-menu" onPress={openDrawer} style={styles.iconButton}>
           <Text style={styles.menuIcon}>☰</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.searchPill} activeOpacity={0.85} onPress={() => setSelectedPath(null)}>
-          <Text style={styles.searchText} testID="org-library-title">Search Keep</Text>
+          <Text style={styles.searchText} testID="org-library-title">Search Postep</Text>
           <Text style={styles.searchIcon}>▭</Text>
           <Text style={styles.searchIcon}>↕</Text>
         </TouchableOpacity>
@@ -654,7 +654,7 @@ export default function LibraryScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#111217' },
-  keepHeader: {
+  postepHeader: {
     paddingTop: 18,
     paddingHorizontal: 16,
     paddingBottom: 14,
