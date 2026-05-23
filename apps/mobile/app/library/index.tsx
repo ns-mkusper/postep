@@ -9,7 +9,8 @@ import {
   ActivityIndicator,
   ScrollView,
   TextInput,
-  useWindowDimensions
+  useWindowDimensions,
+  type GestureResponderEvent
 } from 'react-native';
 import { DrawerActions } from '@react-navigation/native';
 import { router, useNavigation } from 'expo-router';
@@ -31,6 +32,7 @@ type NoteLine = {
   text: string;
   checked?: boolean | null;
   kind: 'heading' | 'list' | 'body';
+  lineStart?: number;
 };
 
 type NoteMetadata = {
@@ -80,6 +82,30 @@ function textForNode(node: SlateNode) {
   return cleanOrgText(node.raw);
 }
 
+
+function listItemPreviewText(raw: string, node: Extract<SlateNode, { type: 'list_item' }>) {
+  const lines = raw.split('\n');
+  const first = lines[node.line_start] ?? '';
+  const indent = first.match(/^\s*/)?.[0].length ?? 0;
+  const body = [node.text];
+  for (let idx = node.line_start + 1; idx < lines.length; idx += 1) {
+    const line = lines[idx];
+    const trimmed = line.trim();
+    const nextIndent = line.match(/^\s*/)?.[0].length ?? 0;
+    if (!trimmed) {
+      break;
+    }
+    if (/^\*+\s+/.test(trimmed) || /^(SCHEDULED|DEADLINE|CLOSED):/.test(trimmed) || /^#\+/.test(trimmed) || /^:[A-Z0-9_+-]+:$/i.test(trimmed)) {
+      break;
+    }
+    if (/^([-+]|\d+[.)])\s+/.test(trimmed) && nextIndent <= indent) {
+      break;
+    }
+    body.push(trimmed.replace(/^([-+]|\d+[.)])\s+(\[[ xX]\]\s+)?/, ''));
+  }
+  return cleanOrgText(body.join('\n'));
+}
+
 function titleFromDocument(doc: DocumentRef, nodes: SlateNode[]) {
   const titleDirective = nodes.find((node) => node.type === 'directive' && node.keyword.toUpperCase() === 'TITLE');
   if (titleDirective && 'text' in titleDirective && titleDirective.text.trim()) {
@@ -117,8 +143,8 @@ function buildPreview(doc: DocumentRef, config: { roots: string[]; roamRoots?: s
         return text && text !== title ? [{ text, kind: 'heading' }] : [];
       }
       if (node.type === 'list_item') {
-        const text = textForNode(node);
-        return text ? [{ text, checked: node.checked ?? null, kind: 'list' }] : [];
+        const text = listItemPreviewText(payload.raw, node);
+        return text ? [{ text, checked: node.checked ?? null, kind: 'list', lineStart: node.line_start }] : [];
       }
       if (node.type === 'paragraph') {
         const text = textForNode(node);
@@ -267,6 +293,23 @@ function isVisibleDocumentBlock(block: OrgBlockViewModel) {
   return true;
 }
 
+function toggleRawCheckbox(raw: string, lineStart: number): string {
+  const lines = raw.split('\n');
+  const line = lines[lineStart];
+  if (!line) {
+    return raw;
+  }
+  if (/^(\s*[-+]\s+)\[ \]/.test(line)) {
+    lines[lineStart] = line.replace(/^(\s*[-+]\s+)\[ \]/, '$1[X]');
+    return lines.join('\n');
+  }
+  if (/^(\s*[-+]\s+)\[[xX]\]/.test(line)) {
+    lines[lineStart] = line.replace(/^(\s*[-+]\s+)\[[xX]\]/, '$1[ ]');
+    return lines.join('\n');
+  }
+  return raw;
+}
+
 export default function LibraryScreen() {
   const navigation = useNavigation();
   const queryClient = useQueryClient();
@@ -382,6 +425,34 @@ export default function LibraryScreen() {
 
   const openDrawer = () => navigation.dispatch(DrawerActions.openDrawer());
 
+  const toggleChecklistItem = (path: string, lineStart?: number) => {
+    if (lineStart === undefined || bridgeConfig.roots.length === 0) {
+      return;
+    }
+    const payload = loadDocument(bridgeConfig, path);
+    const nextRaw = toggleRawCheckbox(payload.raw, lineStart);
+    if (nextRaw === payload.raw) {
+      return;
+    }
+    const { value: nextPayload, metric } = measureInteraction('checklistToggle', () =>
+      updateDocument({
+        roots: bridgeConfig.roots,
+        roamRoots: bridgeConfig.roamRoots,
+        path,
+        raw: nextRaw
+      })
+    );
+    queryClient.setQueryData(['document', path, bridgeConfig.roots.join(':'), bridgeConfig.roamRoots?.join(':') ?? ''], nextPayload);
+    queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'documents' });
+    queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'agenda' });
+    setInteractionStatus(`checklistToggle ${metric.elapsedMs.toFixed(2)}ms`);
+  };
+
+  const handleChecklistPress = (event: GestureResponderEvent, path: string, lineStart?: number) => {
+    event.stopPropagation();
+    toggleChecklistItem(path, lineStart);
+  };
+
   const renderNoteCard = ({ item }: { item: NotePreview }) => (
     <TouchableOpacity
       style={styles.noteCard}
@@ -400,7 +471,17 @@ export default function LibraryScreen() {
       <View style={styles.previewLines}>
         {item.lines.map((line, index) => (
           <View key={`${line.text}:${index}`} style={styles.previewLine}>
-            {line.kind === 'list' ? <View style={[styles.checkbox, line.checked && styles.checkboxChecked]} /> : <View style={styles.previewBullet} />}
+            {line.kind === 'list' ? (
+              <TouchableOpacity
+                testID={`note-checkbox-${item.doc.name}-${line.lineStart ?? index}`}
+                onPress={(event) => handleChecklistPress(event, item.doc.path, line.lineStart)}
+                style={[styles.checkbox, line.checked && styles.checkboxChecked]}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: Boolean(line.checked) }}
+              />
+            ) : (
+              <View style={styles.previewBullet} />
+            )}
             <Text numberOfLines={index > 3 ? 1 : 2} style={[styles.previewText, line.checked && styles.previewCheckedText]}>
               {line.text}
             </Text>
