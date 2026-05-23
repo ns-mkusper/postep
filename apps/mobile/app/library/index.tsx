@@ -51,6 +51,7 @@ type NotePreview = {
   checkedCount: number;
   tags: string[];
   metadata: NoteMetadata;
+  primaryDate?: string | null;
 };
 
 type ChecklistItem = {
@@ -173,7 +174,7 @@ function buildPreview(doc: DocumentRef, config: { roots: string[]; roamRoots?: s
     )
   ).slice(0, 3);
 
-  return { doc, title, lines, checkedCount, tags, metadata };
+  return { doc, title, lines, checkedCount, tags, metadata, primaryDate: metadata.scheduled?.slice(0, 10) ?? metadata.deadline?.slice(0, 10) ?? null };
 }
 
 
@@ -388,7 +389,9 @@ export default function LibraryScreen() {
       return { value: [] as NotePreview[], metric: { elapsedMs: 0 } };
     }
     return measureInteraction('noteGrid', () =>
-      documentsQuery.data.map((doc) => buildPreview(doc, bridgeConfig))
+      documentsQuery.data
+        .map((doc) => buildPreview(doc, bridgeConfig))
+        .sort((left, right) => (left.primaryDate ?? '9999-12-31').localeCompare(right.primaryDate ?? '9999-12-31'))
     );
   }, [bridgeConfig, documentsQuery.data]);
 
@@ -625,7 +628,7 @@ export default function LibraryScreen() {
           {item.metadata.priority && <Text style={styles.priorityChip}>#{item.metadata.priority}</Text>}
           {item.metadata.habit && <Text style={styles.habitChip}>Habit</Text>}
           {item.metadata.scheduled && <Text style={styles.metaChip}>Scheduled {item.metadata.scheduled}</Text>}
-          {item.metadata.deadline && <Text style={styles.deadlineChip}>Due {item.metadata.deadline}</Text>}
+          {item.metadata.deadline && !item.metadata.scheduled && <Text style={styles.deadlineChip}>Due {item.metadata.deadline}</Text>}
         </View>
       </TouchableOpacity>
       <View style={styles.previewLines}>
