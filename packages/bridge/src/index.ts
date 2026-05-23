@@ -667,6 +667,32 @@ function rawToSlate(raw: string): SlateNode[] {
       });
       continue;
     }
+    const drawer = trimmed.match(/^:([A-Z0-9_+-]+):$/i);
+    if (drawer && drawer[1].toUpperCase() !== 'END') {
+      const start = idx;
+      const rawLines = [line];
+      const body: string[] = [];
+      idx += 1;
+      while (idx < lines.length) {
+        rawLines.push(lines[idx]);
+        if (lines[idx].trim().toUpperCase() === ':END:') {
+          idx += 1;
+          break;
+        }
+        body.push(lines[idx]);
+        idx += 1;
+      }
+      nodes.push({
+        type: 'drawer',
+        name: drawer[1].toUpperCase(),
+        text: body.join('\n'),
+        raw: rawLines.join('\n'),
+        collapsed: true,
+        line_start: start,
+        line_end: idx - 1
+      });
+      continue;
+    }
     const list = line.match(/^(\s*)([-+]|\d+[.)])\s+(\[[ xX]\]\s+)?(.*)$/);
     if (list) {
       nodes.push({

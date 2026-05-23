@@ -27,22 +27,57 @@ import {
   type OrgBlockViewModel
 } from '../../lib/orgSlateModel';
 
+type NoteLine = {
+  text: string;
+  checked?: boolean | null;
+  kind: 'heading' | 'list' | 'body';
+};
+
+type NoteMetadata = {
+  todo?: string | null;
+  priority?: string | null;
+  scheduled?: string | null;
+  deadline?: string | null;
+  habit?: boolean;
+  properties: Array<{ key: string; value: string }>;
+};
+
 type NotePreview = {
   doc: DocumentRef;
   title: string;
-  lines: Array<{ text: string; checked?: boolean | null }>;
+  lines: NoteLine[];
   checkedCount: number;
   tags: string[];
+  metadata: NoteMetadata;
 };
+
+function cleanOrgText(text: string) {
+  return text
+    .replace(/\[\[([^\]]+)\]\[([^\]]+)\]\]/g, '$2')
+    .replace(/\[\[([^\]]+)\]\]/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function humanizeTimestamp(text?: string | null) {
+  if (!text) {
+    return null;
+  }
+  return text.replace(/[<>]/g, '').replace(/\s+\+\d+[dwmy]/i, '').trim();
+}
+
+function isInternalParagraph(text: string) {
+  return /^:(LOGBOOK|END):$/i.test(text.trim()) || /^State ".*" from ".*" \[/.test(text.trim());
+}
 
 function textForNode(node: SlateNode) {
   if ('text' in node) {
-    return node.text.trim();
+    return cleanOrgText(node.text);
   }
   if (node.type === 'table') {
     return node.rows[0]?.join(' · ') ?? 'Table';
   }
-  return node.raw.trim();
+  return cleanOrgText(node.raw);
 }
 
 function titleFromDocument(doc: DocumentRef, nodes: SlateNode[]) {
@@ -60,16 +95,42 @@ function titleFromDocument(doc: DocumentRef, nodes: SlateNode[]) {
 function buildPreview(doc: DocumentRef, config: { roots: string[]; roamRoots?: string[] }): NotePreview {
   const payload = loadDocument(config, doc.path);
   const title = titleFromDocument(doc, payload.slate);
-  const contentNodes = payload.slate.filter((node) => {
-    if (node.type === 'directive' && node.keyword.toUpperCase() === 'TITLE') {
-      return false;
-    }
-    return ['heading', 'list_item', 'paragraph', 'planning', 'table', 'code_block'].includes(node.type);
-  });
-  const lines = contentNodes
-    .map((node) => ({ text: textForNode(node), checked: node.type === 'list_item' ? node.checked : null }))
-    .filter((line) => line.text.length > 0 && line.text !== title)
-    .slice(0, 9);
+  const firstHeading = payload.slate.find((node): node is Extract<SlateNode, { type: 'heading' }> => node.type === 'heading');
+  const planning = payload.slate.filter((node): node is Extract<SlateNode, { type: 'planning' }> => node.type === 'planning');
+  const propertyDrawer = payload.slate.find((node): node is Extract<SlateNode, { type: 'property_drawer' }> => node.type === 'property_drawer');
+  const metadata: NoteMetadata = {
+    todo: firstHeading?.todo_keyword ?? null,
+    priority: firstHeading?.priority ?? null,
+    scheduled: humanizeTimestamp(planning.find((node) => node.keyword === 'SCHEDULED')?.text),
+    deadline: humanizeTimestamp(planning.find((node) => node.keyword === 'DEADLINE')?.text),
+    habit: Boolean(firstHeading?.tags.includes('habit') || propertyDrawer?.properties.STYLE?.toLowerCase() === 'habit'),
+    properties: propertyDrawer
+      ? Object.entries(propertyDrawer.properties)
+          .filter(([key]) => ['STYLE', 'LAST_REPEAT', 'EFFORT'].includes(key.toUpperCase()))
+          .map(([key, value]) => ({ key, value }))
+      : []
+  };
+  const lines: NoteLine[] = payload.slate
+    .flatMap((node): NoteLine[] => {
+      if (node.type === 'heading') {
+        const text = textForNode(node);
+        return text && text !== title ? [{ text, kind: 'heading' }] : [];
+      }
+      if (node.type === 'list_item') {
+        const text = textForNode(node);
+        return text ? [{ text, checked: node.checked ?? null, kind: 'list' }] : [];
+      }
+      if (node.type === 'paragraph') {
+        const text = textForNode(node);
+        return text && !isInternalParagraph(text) ? [{ text, kind: 'body' }] : [];
+      }
+      if (node.type === 'table') {
+        const text = textForNode(node);
+        return text ? [{ text, kind: 'body' }] : [];
+      }
+      return [];
+    })
+    .slice(0, 7);
   const checkedCount = payload.slate.filter((node) => node.type === 'list_item' && node.checked).length;
   const tags = Array.from(
     new Set(
@@ -79,7 +140,131 @@ function buildPreview(doc: DocumentRef, config: { roots: string[]; roamRoots?: s
     )
   ).slice(0, 3);
 
-  return { doc, title, lines, checkedCount, tags };
+  return { doc, title, lines, checkedCount, tags, metadata };
+}
+
+
+function renderOrgNode(node: SlateNode, fallback: Parameters<typeof SlateDocument>[0]['value']) {
+  if (node.type === 'heading') {
+    return (
+      <View style={styles.renderedHeading}>
+        <View style={styles.metadataRow}>
+          {node.todo_keyword && <Text style={styles.todoChip}>{node.todo_keyword}</Text>}
+          {node.priority && <Text style={styles.priorityChip}>Priority {node.priority}</Text>}
+          {node.tags.includes('habit') && <Text style={styles.habitChip}>Habit</Text>}
+          {node.tags.map((tag) => (
+            <Text key={tag} style={styles.tagChip}>#{tag}</Text>
+          ))}
+        </View>
+        <Text style={[styles.renderedHeadingText, node.depth > 1 && styles.renderedSubheadingText]}>{cleanOrgText(node.text)}</Text>
+      </View>
+    );
+  }
+
+  if (node.type === 'planning') {
+    return (
+      <View style={styles.metadataCard}>
+        <Text style={styles.metadataLabel}>{node.keyword}</Text>
+        <Text style={styles.metadataValue}>{humanizeTimestamp(node.text) ?? cleanOrgText(node.text)}</Text>
+      </View>
+    );
+  }
+
+  if (node.type === 'property_drawer') {
+    const entries = Object.entries(node.properties);
+    return (
+      <View style={styles.metadataCard}>
+        <Text style={styles.metadataLabel}>Properties</Text>
+        <View style={styles.propertyGrid}>
+          {entries.map(([key, value]) => (
+            <View key={key} style={styles.propertyPill}>
+              <Text style={styles.propertyKey}>{key}</Text>
+              <Text style={styles.propertyValue}>{value}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  }
+
+  if (node.type === 'drawer') {
+    const entryCount = node.text.split('\n').filter((line) => line.trim().length > 0).length;
+    return (
+      <View style={styles.metadataCard}>
+        <Text style={styles.metadataLabel}>{node.name}</Text>
+        <Text style={styles.metadataValue}>{node.collapsed ? `${entryCount} entr${entryCount === 1 ? 'y' : 'ies'}` : cleanOrgText(node.text)}</Text>
+      </View>
+    );
+  }
+
+  if (node.type === 'paragraph') {
+    return <Text style={styles.paragraphText}>{cleanOrgText(node.text)}</Text>;
+  }
+
+  if (node.type === 'list_item') {
+    return (
+      <View style={styles.renderedListItem}>
+        <View style={[styles.checkbox, node.checked && styles.checkboxChecked]} />
+        <Text style={[styles.paragraphText, node.checked && styles.previewCheckedText]}>{cleanOrgText(node.text)}</Text>
+      </View>
+    );
+  }
+
+  if (node.type === 'table') {
+    return (
+      <View style={styles.metadataCard}>
+        {node.rows.map((row, index) => (
+          <Text key={`${row.join(':')}:${index}`} style={styles.monoText}>{row.join('   ')}</Text>
+        ))}
+      </View>
+    );
+  }
+
+  if (node.type === 'code_block') {
+    return (
+      <View style={styles.codeCard}>
+        {node.language && <Text style={styles.metadataLabel}>{node.language}</Text>}
+        <Text style={styles.codeText}>{node.text}</Text>
+      </View>
+    );
+  }
+
+  if (node.type === 'directive') {
+    if (['TITLE', 'CATEGORY'].includes(node.keyword.toUpperCase())) {
+      return (
+        <View style={styles.metadataCard}>
+          <Text style={styles.metadataLabel}>{node.keyword}</Text>
+          <Text style={styles.metadataValue}>{cleanOrgText(node.text)}</Text>
+        </View>
+      );
+    }
+  }
+
+  return <SlateDocument value={fallback} />;
+}
+
+
+function blockLabel(node: SlateNode) {
+  if (node.type === 'heading') {
+    return 'Note';
+  }
+  if (node.type === 'planning') {
+    return node.keyword === 'DEADLINE' ? 'Due date' : 'Schedule';
+  }
+  if (node.type === 'property_drawer') {
+    return 'Metadata';
+  }
+  if (node.type === 'drawer') {
+    return node.name === 'LOGBOOK' ? 'History' : node.name;
+  }
+  return node.type.replace('_', ' ');
+}
+
+function isVisibleDocumentBlock(block: OrgBlockViewModel) {
+  if (block.node.type === 'directive' && ['TITLE', 'CATEGORY'].includes(block.node.keyword.toUpperCase())) {
+    return false;
+  }
+  return true;
 }
 
 export default function LibraryScreen() {
@@ -136,6 +321,7 @@ export default function LibraryScreen() {
       })
     ), [documentQuery.data?.raw, documentQuery.data?.slate, outlineOnly, readerMode]);
   const blocks = blockModel.value;
+  const visibleBlocks = useMemo(() => blocks.filter(isVisibleDocumentBlock), [blocks]);
   const selectedName = documentsQuery.data?.find((doc) => doc.path === selectedPath)?.name ?? 'Org note';
 
   useEffect(() => {
@@ -204,10 +390,17 @@ export default function LibraryScreen() {
       activeOpacity={0.78}
     >
       <Text style={styles.noteTitle}>{item.title}</Text>
+      <View style={styles.metadataRow}>
+        {item.metadata.todo && <Text style={styles.todoChip}>{item.metadata.todo}</Text>}
+        {item.metadata.priority && <Text style={styles.priorityChip}>#{item.metadata.priority}</Text>}
+        {item.metadata.habit && <Text style={styles.habitChip}>Habit</Text>}
+        {item.metadata.scheduled && <Text style={styles.metaChip}>Scheduled {item.metadata.scheduled}</Text>}
+        {item.metadata.deadline && <Text style={styles.deadlineChip}>Due {item.metadata.deadline}</Text>}
+      </View>
       <View style={styles.previewLines}>
         {item.lines.map((line, index) => (
           <View key={`${line.text}:${index}`} style={styles.previewLine}>
-            <View style={[styles.checkbox, line.checked && styles.checkboxChecked]} />
+            {line.kind === 'list' ? <View style={[styles.checkbox, line.checked && styles.checkboxChecked]} /> : <View style={styles.previewBullet} />}
             <Text numberOfLines={index > 3 ? 1 : 2} style={[styles.previewText, line.checked && styles.previewCheckedText]}>
               {line.text}
             </Text>
@@ -297,7 +490,7 @@ export default function LibraryScreen() {
               {documentQuery.isFetching && <ActivityIndicator style={{ marginVertical: 24 }} color="#AFC0FF" />}
               {!documentQuery.isFetching && documentQuery.data && blocks.length > 0 && (
                 <View style={styles.blocksContainer}>
-                  {blocks.map((block) => {
+                  {visibleBlocks.map((block) => {
                     const isEditing = editingBlockId === block.id;
                     return (
                       <View
@@ -306,7 +499,7 @@ export default function LibraryScreen() {
                         style={[styles.blockCard, block.node.type === 'heading' && styles.headingCard]}
                       >
                         <View style={styles.blockToolbar}>
-                          <Text style={styles.blockType}>{block.node.type.replace('_', ' ')}</Text>
+                          <Text style={styles.blockType}>{blockLabel(block.node)}</Text>
                           <View style={styles.blockActions}>
                             <TouchableOpacity testID={`block-move-up-${block.node.line_start}`} onPress={() => moveBlock(block, -1)} style={styles.smallAction}>
                               <Text style={styles.smallActionText}>↑</Text>
@@ -340,7 +533,7 @@ export default function LibraryScreen() {
                             </View>
                           </View>
                         ) : (
-                          <SlateDocument value={block.descendants} />
+                          renderOrgNode(block.node, block.descendants)
                         )}
                       </View>
                     );
@@ -412,16 +605,23 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     minHeight: 164
   },
-  noteTitle: { color: '#ECEEF8', fontSize: 27, fontWeight: '800', marginBottom: 18 },
+  noteTitle: { color: '#ECEEF8', fontSize: 27, fontWeight: '800', marginBottom: 12 },
+  metadataRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14, alignItems: 'center' },
+  todoChip: { color: '#111217', backgroundColor: '#B8C6F4', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, fontSize: 12, fontWeight: '900', overflow: 'hidden' },
+  priorityChip: { color: '#FFE8A3', backgroundColor: '#3A321A', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, fontSize: 12, fontWeight: '800', overflow: 'hidden' },
+  habitChip: { color: '#BDF7D3', backgroundColor: '#173828', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, fontSize: 12, fontWeight: '800', overflow: 'hidden' },
+  metaChip: { color: '#C8D2F0', backgroundColor: '#242A3C', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, fontSize: 12, overflow: 'hidden' },
+  deadlineChip: { color: '#FFD0D0', backgroundColor: '#3B2024', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, fontSize: 12, fontWeight: '800', overflow: 'hidden' },
   previewLines: { gap: 10 },
   previewLine: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   checkbox: { width: 21, height: 21, borderRadius: 3, borderWidth: 2.5, borderColor: '#9A9DA8', marginTop: 3 },
+  previewBullet: { width: 21, height: 21, marginTop: 3, alignItems: 'center', justifyContent: 'center' },
   checkboxChecked: { backgroundColor: '#AEB4C8', borderColor: '#AEB4C8' },
   previewText: { flex: 1, color: '#E3E6F0', fontSize: 23, lineHeight: 30 },
   previewCheckedText: { color: '#8E929D', textDecorationLine: 'line-through' },
   checkedSummary: { color: '#8C8F9A', fontSize: 19, marginTop: 20, marginLeft: 32 },
   tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 },
-  tagChip: { color: '#C7CBE0', backgroundColor: '#2D3039', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, fontSize: 12 },
+  tagChip: { color: '#C7CBE0', backgroundColor: '#2D3039', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, fontSize: 12, overflow: 'hidden' },
   emptyDocs: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   emptyDocsText: { color: '#858A98', fontSize: 16 },
   fab: {
@@ -468,6 +668,21 @@ const styles = StyleSheet.create({
   blocksContainer: { padding: 12 },
   blockCard: { backgroundColor: '#181A21', borderRadius: 18, padding: 12, marginBottom: 12, borderWidth: 1.5, borderColor: '#3C404B' },
   headingCard: { borderColor: '#575B6A', backgroundColor: '#14161D' },
+  renderedHeading: { paddingVertical: 4 },
+  renderedHeadingText: { color: '#F4F6FF', fontSize: 24, lineHeight: 30, fontWeight: '800' },
+  renderedSubheadingText: { fontSize: 20, lineHeight: 26 },
+  metadataCard: { backgroundColor: '#111620', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: '#303746' },
+  metadataLabel: { color: '#8EA0C3', fontSize: 11, fontWeight: '900', textTransform: 'uppercase', marginBottom: 6 },
+  metadataValue: { color: '#E4E8F5', fontSize: 15, lineHeight: 21 },
+  propertyGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  propertyPill: { backgroundColor: '#202633', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: '#364055' },
+  propertyKey: { color: '#8EA0C3', fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
+  propertyValue: { color: '#F0F3FC', fontSize: 13, marginTop: 2 },
+  paragraphText: { color: '#E4E8F5', fontSize: 16, lineHeight: 23 },
+  renderedListItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 4 },
+  monoText: { color: '#DCE4F9', fontSize: 13, lineHeight: 20, fontFamily: 'monospace' },
+  codeCard: { backgroundColor: '#070A10', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: '#243040' },
+  codeText: { color: '#A7F3D0', fontSize: 13, lineHeight: 20, fontFamily: 'monospace' },
   blockToolbar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   blockType: { color: '#8F98B2', fontSize: 11, textTransform: 'uppercase' },
   blockActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
