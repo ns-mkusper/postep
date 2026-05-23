@@ -471,16 +471,20 @@ function ensureE2EDocs(): void {
     const day = String(index).padStart(2, '0');
     const scheduledDow = weekdayName(2026, 5, index);
     const deadlineDow = weekdayName(2026, 6, index);
+    const sampleId = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+    const nextIndex = index === 10 ? 1 : index + 1;
+    const nextId = `00000000-0000-4000-8000-${String(nextIndex).padStart(12, '0')}`;
     const raw = `#+TITLE: E2E Org Sample ${index}
 #+CATEGORY: postep-e2e
 * TODO [#A] Morning habit ${index} :habit:daily:
 SCHEDULED: <2026-05-${day} ${scheduledDow} 06:30 +1d>
 :PROPERTIES:
+:ID: ${sampleId}
 :STYLE: habit
-:LAST_REPEAT: [2026-05-${day} Thu]
+:LAST_REPEAT: [2026-05-${day} ${scheduledDow}]
 :END:
 :LOGBOOK:
-- State "DONE" from "TODO" [2026-05-${day} Thu]
+- State "DONE" from "TODO" [2026-05-${day} ${scheduledDow}]
 :END:
 - [ ] open app workflow ${index}
 - [X] render org blocks ${index}
@@ -488,7 +492,7 @@ SCHEDULED: <2026-05-${day} ${scheduledDow} 06:30 +1d>
 * WAITING Agenda item ${index} :agenda:
 DEADLINE: <2026-06-${day} ${deadlineDow} 09:00>
 Common agenda text for full launched UI automation ${index}.
-[[sample-${String(index === 10 ? 1 : index + 1).padStart(2, '0')}]]
+[[id:${nextId}][sample-${String(nextIndex).padStart(2, '0')}]]
 
 * Notes ${index}
 | Metric | Budget |
@@ -544,16 +548,18 @@ function loadE2EDocument(path: string): DocumentPayload {
 function buildE2ERoamGraph(): RoamGraph {
   ensureE2EDocs();
   const nodes = [...e2eDocs.keys()].map((path) => {
-    const id = path.split('/').pop()?.replace(/\.org$/, '') ?? path;
     const raw = e2eDocs.get(path) ?? '';
-    const title = raw.match(/^#\+TITLE:\s*(.*)$/m)?.[1] ?? id;
+    const fallbackId = path.split('/').pop()?.replace(/\.org$/, '') ?? path;
+    const id = raw.match(/^:ID:\s*(.+)$/m)?.[1]?.trim() ?? fallbackId;
+    const title = raw.match(/^#\+TITLE:\s*(.*)$/m)?.[1] ?? fallbackId;
     const tags = [...raw.matchAll(/:([A-Za-z0-9_@#%:]+):/g)].flatMap((match) => match[1].split(':').filter(Boolean));
     return { id, title, path, tags: [...new Set(tags)] };
   });
   const knownIds = new Set(nodes.map((node) => node.id));
   const links = [...e2eDocs.entries()].flatMap(([path, raw]) => {
-    const source = path.split('/').pop()?.replace(/\.org$/, '') ?? path;
-    return [...raw.matchAll(/\[\[([^\]]+)\]\]/g)]
+    const sourceNode = nodes.find((node) => node.path === path);
+    const source = sourceNode?.id ?? path;
+    return [...raw.matchAll(/\[\[(?:id:)?([^\]]+)\](?:\[[^\]]*\])?\]/g)]
       .map((match) => match[1])
       .filter((target) => knownIds.has(target))
       .map((target) => ({ source, target }));
