@@ -53,6 +53,13 @@ type NotePreview = {
   metadata: NoteMetadata;
 };
 
+type ChecklistItem = {
+  id: string;
+  text: string;
+  checked: boolean;
+  lineStart: number;
+};
+
 function cleanOrgText(text: string) {
   return text
     .replace(/\[\[([^\]]+)\]\[([^\]]+)\]\]/g, '$2')
@@ -169,6 +176,39 @@ function buildPreview(doc: DocumentRef, config: { roots: string[]; roamRoots?: s
   return { doc, title, lines, checkedCount, tags, metadata };
 }
 
+
+
+function buildChecklistItems(raw: string, nodes: SlateNode[]): ChecklistItem[] {
+  return nodes
+    .filter((node): node is Extract<SlateNode, { type: 'list_item' }> => node.type === 'list_item' && node.checked !== null)
+    .map((node) => ({
+      id: `${node.line_start}:${node.text}`,
+      text: listItemPreviewText(raw, node),
+      checked: Boolean(node.checked),
+      lineStart: node.line_start
+    }));
+}
+
+function insertChecklistItem(raw: string, text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return raw;
+  }
+  const lines = raw.split('\n');
+  let insertAt = -1;
+  for (let idx = lines.length - 1; idx >= 0; idx -= 1) {
+    if (/^\s*[-+]\s+\[[ xX]\]/.test(lines[idx])) {
+      insertAt = idx + 1;
+      break;
+    }
+  }
+  if (insertAt < 0) {
+    const firstHeading = lines.findIndex((line) => /^\*+\s+/.test(line));
+    insertAt = firstHeading >= 0 ? firstHeading + 1 : lines.length;
+  }
+  lines.splice(insertAt, 0, `- [ ] ${trimmed}`);
+  return lines.join('\n');
+}
 
 function renderOrgNode(node: SlateNode, fallback: Parameters<typeof SlateDocument>[0]['value']) {
   if (node.type === 'heading') {
@@ -320,6 +360,8 @@ export default function LibraryScreen() {
   const [showDocument, setShowDocument] = useState(true);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [draftRaw, setDraftRaw] = useState('');
+  const [newChecklistText, setNewChecklistText] = useState('');
+  const [showCheckedItems, setShowCheckedItems] = useState(true);
   const [interactionStatus, setInteractionStatus] = useState<string | null>(null);
   const { width } = useWindowDimensions();
   const numColumns = width >= 520 ? 2 : 1;
@@ -366,6 +408,12 @@ export default function LibraryScreen() {
   const blocks = blockModel.value;
   const visibleBlocks = useMemo(() => blocks.filter(isVisibleDocumentBlock), [blocks]);
   const selectedName = documentsQuery.data?.find((doc) => doc.path === selectedPath)?.name ?? 'Org note';
+  const checklistItems = useMemo(() =>
+    documentQuery.data ? buildChecklistItems(documentQuery.data.raw, documentQuery.data.slate) : [],
+    [documentQuery.data?.raw, documentQuery.data?.slate]
+  );
+  const uncheckedItems = checklistItems.filter((item) => !item.checked);
+  const checkedItems = checklistItems.filter((item) => item.checked);
 
   useEffect(() => {
     const metric = selectedPath ? blockModel.metric.elapsedMs : noteGrid.metric.elapsedMs;
@@ -452,6 +500,81 @@ export default function LibraryScreen() {
     event.stopPropagation();
     toggleChecklistItem(path, lineStart);
   };
+
+  const addChecklistItem = () => {
+    if (!selectedPath || !documentQuery.data || !newChecklistText.trim()) {
+      return;
+    }
+    const nextRaw = insertChecklistItem(documentQuery.data.raw, newChecklistText);
+    persistRaw(nextRaw, 'checklistAdd');
+    setNewChecklistText('');
+  };
+
+  const renderChecklistRow = (item: ChecklistItem) => (
+    <View key={item.id} style={styles.listEditorRow}>
+      <Text style={styles.dragHandle}>⠿</Text>
+      <TouchableOpacity
+        testID={`detail-checkbox-${item.lineStart}`}
+        onPress={() => selectedPath && toggleChecklistItem(selectedPath, item.lineStart)}
+        style={[styles.detailCheckbox, item.checked && styles.detailCheckboxChecked]}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: item.checked }}
+      >
+        {item.checked && <Text style={styles.detailCheckmark}>✓</Text>}
+      </TouchableOpacity>
+      <Text style={[styles.listEditorText, item.checked && styles.listEditorCheckedText]}>{item.text}</Text>
+    </View>
+  );
+
+  const renderChecklistEditor = () => (
+    <View style={styles.listEditorScreen}>
+      <View style={styles.listEditorTopBar}>
+        <TouchableOpacity onPress={() => setSelectedPath(null)} style={styles.iconButton} testID="back-to-notes">
+          <Text style={styles.backArrow}>‹</Text>
+        </TouchableOpacity>
+        <View style={styles.listEditorActions}>
+          <TouchableOpacity style={styles.roundIconButton}><Text style={styles.roundIconText}>👤＋</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.roundIconButton}><Text style={styles.roundIconText}>󰂚</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.roundIconButton}><Text style={styles.roundIconText}>⋮</Text></TouchableOpacity>
+        </View>
+      </View>
+      <ScrollView testID="document-scroll" style={styles.listEditorScroll} contentContainerStyle={styles.listEditorContent}>
+        <Text style={styles.listEditorTitle}>{titleFromDocument({ path: selectedPath ?? '', name: selectedName }, documentQuery.data?.slate ?? [])}</Text>
+        {uncheckedItems.map(renderChecklistRow)}
+        <View style={styles.addListRow}>
+          <Text style={styles.addListIcon}>＋</Text>
+          <TextInput
+            testID="new-list-item-input"
+            style={styles.addListInput}
+            value={newChecklistText}
+            onChangeText={setNewChecklistText}
+            onSubmitEditing={addChecklistItem}
+            placeholder="List item"
+            placeholderTextColor="#AEB4A8"
+            returnKeyType="done"
+          />
+        </View>
+        {checkedItems.length > 0 && (
+          <View style={styles.checkedSection}>
+            <TouchableOpacity style={styles.checkedHeader} onPress={() => setShowCheckedItems((value) => !value)}>
+              <Text style={styles.checkedChevron}>{showCheckedItems ? '⌄' : '›'}</Text>
+              <Text style={styles.checkedHeaderText}>{checkedItems.length} Checked item{checkedItems.length === 1 ? '' : 's'}</Text>
+            </TouchableOpacity>
+            {showCheckedItems && checkedItems.map(renderChecklistRow)}
+          </View>
+        )}
+      </ScrollView>
+      <View style={styles.bottomToolbar}>
+        <TouchableOpacity style={styles.bottomTool}><Text style={styles.bottomToolText}>⊞</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.bottomTool}><Text style={styles.bottomToolText}>◉</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.bottomTool}><Text style={styles.bottomToolText}>A</Text></TouchableOpacity>
+        <View style={{ flex: 1 }} />
+        <TouchableOpacity style={styles.bottomTool}><Text style={styles.bottomToolText}>↶</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.bottomTool}><Text style={[styles.bottomToolText, { opacity: 0.4 }]}>↷</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.bottomTool}><Text style={styles.bottomToolText}>⋮</Text></TouchableOpacity>
+      </View>
+    </View>
+  );
 
   const openNote = (path: string) => setSelectedPath(path);
 
@@ -560,6 +683,10 @@ export default function LibraryScreen() {
             <Text style={styles.fabText}>＋</Text>
           </TouchableOpacity>
         </View>
+      ) : checklistItems.length > 0 && documentQuery.data ? (
+        renderChecklistEditor()
+      ) : checklistItems.length > 0 && documentQuery.data ? (
+        renderChecklistEditor()
       ) : (
         <View style={styles.editorScreen}>
           <View style={styles.documentTopBar}>
@@ -741,6 +868,39 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   fabText: { color: '#202234', fontSize: 52, lineHeight: 58, fontWeight: '300' },
+  listEditorScreen: { flex: 1, backgroundColor: '#071009' },
+  listEditorTopBar: {
+    paddingTop: 18,
+    paddingHorizontal: 18,
+    paddingBottom: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  backArrow: { color: '#E6EADE', fontSize: 52, lineHeight: 58, fontWeight: '300' },
+  listEditorActions: { flexDirection: 'row', gap: 14, alignItems: 'center' },
+  roundIconButton: { width: 72, height: 72, borderRadius: 24, backgroundColor: '#111A10', alignItems: 'center', justifyContent: 'center' },
+  roundIconText: { color: '#C5CBBD', fontSize: 25, fontWeight: '800' },
+  listEditorScroll: { flex: 1, backgroundColor: '#071009' },
+  listEditorContent: { paddingHorizontal: 48, paddingBottom: 130 },
+  listEditorTitle: { color: '#F0F4EA', fontSize: 48, lineHeight: 58, fontWeight: '400', marginBottom: 34, marginTop: 48 },
+  listEditorRow: { flexDirection: 'row', alignItems: 'center', minHeight: 74, marginBottom: 12 },
+  dragHandle: { color: '#A7AEA0', fontSize: 34, width: 54, textAlign: 'center', marginRight: 18 },
+  detailCheckbox: { width: 36, height: 36, borderRadius: 4, borderWidth: 4, borderColor: '#B8BEB2', alignItems: 'center', justifyContent: 'center', marginRight: 30 },
+  detailCheckboxChecked: { backgroundColor: '#596052', borderColor: '#596052' },
+  detailCheckmark: { color: '#2F431C', fontSize: 30, lineHeight: 34, fontWeight: '900' },
+  listEditorText: { flex: 1, color: '#E7EBE0', fontSize: 34, lineHeight: 44 },
+  listEditorCheckedText: { color: '#6E746A', textDecorationLine: 'line-through' },
+  addListRow: { flexDirection: 'row', alignItems: 'center', minHeight: 78, marginTop: 12, marginBottom: 20, paddingLeft: 80 },
+  addListIcon: { color: '#B7BDB1', fontSize: 42, lineHeight: 48, marginRight: 34 },
+  addListInput: { flex: 1, color: '#E7EBE0', fontSize: 32, lineHeight: 42, paddingVertical: 10 },
+  checkedSection: { marginTop: 20 },
+  checkedHeader: { flexDirection: 'row', alignItems: 'center', minHeight: 64, marginBottom: 14 },
+  checkedChevron: { color: '#B7BDB1', fontSize: 42, width: 56, marginRight: 24 },
+  checkedHeaderText: { color: '#B7BDB1', fontSize: 32, lineHeight: 42 },
+  bottomToolbar: { position: 'absolute', left: 0, right: 0, bottom: 0, minHeight: 94, paddingHorizontal: 24, paddingVertical: 18, flexDirection: 'row', alignItems: 'center', gap: 18, backgroundColor: '#1A2418' },
+  bottomTool: { width: 62, height: 62, borderRadius: 31, backgroundColor: '#081007', alignItems: 'center', justifyContent: 'center' },
+  bottomToolText: { color: '#D7DCD0', fontSize: 32, fontWeight: '800' },
   editorScreen: { flex: 1, backgroundColor: '#101116' },
   documentTopBar: {
     paddingHorizontal: 18,

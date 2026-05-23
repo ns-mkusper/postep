@@ -16,10 +16,10 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
   await expect(page.getByTestId('document-card-sample-01.org')).toBeVisible();
   await screenshot(page, '01-library-loaded');
 
-  await page.getByTestId('document-card-sample-01.org').click();
-  await expect(page.getByText(/Morning habit 1/).first()).toBeVisible();
-  await expect(page.getByText('SCHEDULED')).toBeVisible();
-  await expect(page.getByText(/\d{4}-\d{2}-\d{2} \w{3} 06:30/)).toBeVisible();
+  await page.getByText('E2E Org Sample 1', { exact: true }).click();
+  await expect(page.getByTestId('new-list-item-input')).toBeVisible();
+  await expect(page.getByText('open app workflow 1')).toBeVisible();
+  await expect(page.getByText('render org blocks 1')).toBeVisible();
   await screenshot(page, '02-document-opened');
 
   const moveButton = page.getByTestId('block-move-down-2').first();
