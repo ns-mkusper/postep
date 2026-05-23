@@ -463,34 +463,49 @@ function timestampDate(text?: string | null): string | null {
   return text.replace(/[<>]/g, '').slice(0, 10);
 }
 
+function localDateParts(offsetDays = 0): { year: number; month: number; day: number; iso: string; dow: string } {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + offsetDays);
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  return {
+    year,
+    month,
+    day,
+    iso: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    dow: weekdayName(year, month, day)
+  };
+}
+
 function ensureE2EDocs(): void {
   if (e2eDocs.size > 0) {
     return;
   }
   for (let index = 1; index <= 10; index += 1) {
-    const day = String(index).padStart(2, '0');
-    const scheduledDow = weekdayName(2026, 5, index);
-    const deadlineDow = weekdayName(2026, 6, index);
+    const scheduledDate = localDateParts(index - 1);
+    const deadlineDate = localDateParts(index + 6);
     const sampleId = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
     const nextIndex = index === 10 ? 1 : index + 1;
     const nextId = `00000000-0000-4000-8000-${String(nextIndex).padStart(12, '0')}`;
     const raw = `#+TITLE: E2E Org Sample ${index}
 #+CATEGORY: postep-e2e
 * TODO [#A] Morning habit ${index} :habit:daily:
-SCHEDULED: <2026-05-${day} ${scheduledDow} 06:30 +1d>
+SCHEDULED: <${scheduledDate.iso} ${scheduledDate.dow} 06:30 +1d>
 :PROPERTIES:
 :ID: ${sampleId}
 :STYLE: habit
-:LAST_REPEAT: [2026-05-${day} ${scheduledDow}]
+:LAST_REPEAT: [${scheduledDate.iso} ${scheduledDate.dow}]
 :END:
 :LOGBOOK:
-- State "DONE" from "TODO" [2026-05-${day} ${scheduledDow}]
+- State "DONE" from "TODO" [${scheduledDate.iso} ${scheduledDate.dow}]
 :END:
 - [ ] open app workflow ${index}
 - [X] render org blocks ${index}
 
 * WAITING Agenda item ${index} :agenda:
-DEADLINE: <2026-06-${day} ${deadlineDow} 09:00>
+DEADLINE: <${deadlineDate.iso} ${deadlineDate.dow} 09:00>
 Common agenda text for full launched UI automation ${index}.
 [[id:${nextId}][sample-${String(nextIndex).padStart(2, '0')}]]
 
@@ -501,7 +516,7 @@ Common agenda text for full launched UI automation ${index}.
 echo e2e-${index}
 #+END_SRC
 `;
-    e2eDocs.set(`${E2E_ORG_ROOT}/sample-${day}.org`, raw);
+    e2eDocs.set(`${E2E_ORG_ROOT}/sample-${String(index).padStart(2, '0')}.org`, raw);
   }
 }
 

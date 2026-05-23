@@ -29,14 +29,66 @@ const STATUS_OPTIONS: Array<{ label: string; value: string }> = [
   { label: 'CANCELLED (C)', value: 'CANCELLED' }
 ];
 
-function groupByDay(items: AgendaItem[]) {
-  const groups: Record<string, AgendaItem[]> = {};
-  for (const item of items) {
-    const key = item.date ?? 'unscheduled';
-    groups[key] = groups[key] ?? [];
-    groups[key].push(item);
+function localDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function daysBetween(date: string, today: string) {
+  const start = new Date(`${date}T00:00:00`);
+  const end = new Date(`${today}T00:00:00`);
+  return Math.round((end.getTime() - start.getTime()) / 86_400_000);
+}
+
+function ageLabel(item: AgendaItem, today: string) {
+  if (!item.date) {
+    return null;
   }
-  return Object.entries(groups).map(([date, list]) => ({ date, list }));
+  const age = daysBetween(item.date, today);
+  if (age > 0) {
+    return `${age}d overdue`;
+  }
+  if (age === 0) {
+    return 'Today';
+  }
+  return `In ${Math.abs(age)}d`;
+}
+
+function groupByDay(items: AgendaItem[]) {
+  const today = localDateString();
+  const missed = items.filter((item) => item.date && item.date < today);
+  const todayItems = items.filter((item) => item.date === today);
+  const upcomingMap: Record<string, AgendaItem[]> = {};
+  const inbox: AgendaItem[] = [];
+
+  for (const item of items) {
+    if (!item.date) {
+      inbox.push(item);
+      continue;
+    }
+    if (item.date < today || item.date === today) {
+      continue;
+    }
+    upcomingMap[item.date] = upcomingMap[item.date] ?? [];
+    upcomingMap[item.date].push(item);
+  }
+
+  const groups: Array<{ date: string; title: string; list: AgendaItem[]; tone?: 'missed' | 'today' | 'upcoming' | 'inbox' }> = [];
+  if (todayItems.length > 0) {
+    groups.push({ date: today, title: 'Today', list: todayItems, tone: 'today' });
+  }
+  if (missed.length > 0) {
+    groups.push({ date: 'missed', title: `Missed · ${missed.length} overdue`, list: missed, tone: 'missed' });
+  }
+  for (const [date, list] of Object.entries(upcomingMap).sort(([left], [right]) => left.localeCompare(right))) {
+    groups.push({ date, title: date, list, tone: 'upcoming' });
+  }
+  if (inbox.length > 0) {
+    groups.push({ date: 'unscheduled', title: 'Inbox', list: inbox, tone: 'inbox' });
+  }
+  return groups;
 }
 
 function cleanOrgText(text: string) {
@@ -166,10 +218,11 @@ export default function AgendaScreen() {
         }
         renderItem={({ item }) => (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{item.date === 'unscheduled' ? 'Inbox' : item.date}</Text>
+            <Text style={[styles.sectionTitle, item.tone === 'today' && styles.todayTitle, item.tone === 'missed' && styles.missedTitle]}>{item.title}</Text>
             {item.list.map((agenda) => {
               const contextLines = cleanAgendaContext(agenda.context);
               const repeater = formatRepeater(agenda);
+              const age = ageLabel(agenda, localDateString());
               return (
                 <View key={`${agenda.path}:${agenda.headline_line}`} testID={`agenda-card-${agenda.headline_line}`} style={styles.cardRow}>
                   <View style={styles.cardHeaderRow}>
@@ -182,6 +235,7 @@ export default function AgendaScreen() {
                     </TouchableOpacity>
                     <Text style={styles.kindChip}>{agenda.kind}</Text>
                     <Text style={styles.dateChip}>{formatScheduleLabel(agenda)}</Text>
+                    {age && <Text style={agenda.date && agenda.date < localDateString() ? styles.overdueChip : styles.ageChip}>{age}</Text>}
                     {repeater && <Text style={styles.repeaterChip}>{repeater}</Text>}
                   </View>
                   <Text style={styles.cardTitle}>{agenda.title}</Text>
@@ -252,6 +306,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     fontWeight: '800'
   },
+  todayTitle: { color: '#DDE6FF' },
+  missedTitle: { color: '#F7B4B4' },
   cardRow: {
     marginBottom: 12,
     backgroundColor: '#1A1D23',
@@ -296,6 +352,26 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     fontSize: 12,
     overflow: 'hidden'
+  },
+  ageChip: {
+    color: '#C9D3EF',
+    backgroundColor: '#222838',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 12,
+    overflow: 'hidden',
+    fontWeight: '800'
+  },
+  overdueChip: {
+    color: '#FFD0D0',
+    backgroundColor: '#3B2024',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 12,
+    overflow: 'hidden',
+    fontWeight: '900'
   },
   repeaterChip: {
     color: '#BDF7D3',
