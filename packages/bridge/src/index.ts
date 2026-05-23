@@ -451,16 +451,30 @@ function normalizeHabit(habit: Habit): Habit {
 
 const e2eDocs = new Map<string, string>();
 
+
+function weekdayName(year: number, month: number, day: number): string {
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
+}
+
+function timestampDate(text?: string | null): string | null {
+  if (!text) {
+    return null;
+  }
+  return text.replace(/[<>]/g, '').slice(0, 10);
+}
+
 function ensureE2EDocs(): void {
   if (e2eDocs.size > 0) {
     return;
   }
   for (let index = 1; index <= 10; index += 1) {
     const day = String(index).padStart(2, '0');
+    const scheduledDow = weekdayName(2026, 5, index);
+    const deadlineDow = weekdayName(2026, 6, index);
     const raw = `#+TITLE: E2E Org Sample ${index}
 #+CATEGORY: postep-e2e
 * TODO [#A] Morning habit ${index} :habit:daily:
-SCHEDULED: <2026-05-${day} Thu 06:30 +1d>
+SCHEDULED: <2026-05-${day} ${scheduledDow} 06:30 +1d>
 :PROPERTIES:
 :STYLE: habit
 :LAST_REPEAT: [2026-05-${day} Thu]
@@ -472,7 +486,7 @@ SCHEDULED: <2026-05-${day} Thu 06:30 +1d>
 - [X] render org blocks ${index}
 
 * WAITING Agenda item ${index} :agenda:
-DEADLINE: <2026-06-${day} Mon 09:00>
+DEADLINE: <2026-06-${day} ${deadlineDow} 09:00>
 Common agenda text for full launched UI automation ${index}.
 [[sample-${String(index === 10 ? 1 : index + 1).padStart(2, '0')}]]
 
@@ -573,7 +587,7 @@ function buildE2EAgendaSnapshot(): AgendaSnapshot {
         .join('\n');
       items.push({
         title: heading.text,
-        date: planning?.text?.slice(0, 10) ?? null,
+        date: timestampDate(planning?.text) ?? null,
         time: planning?.text?.match(/\b\d{2}:\d{2}\b/)?.[0] ?? null,
         context,
         path,
@@ -586,10 +600,10 @@ function buildE2EAgendaSnapshot(): AgendaSnapshot {
       if (styleHabit) {
         habits.push({
           title: `${heading.todo_keyword ? `${heading.todo_keyword} ` : ''}${heading.text}`,
-          scheduled: scheduled?.text?.slice(0, 10) ?? null,
+          scheduled: timestampDate(scheduled?.text) ?? null,
           description: bodyNodes.filter((node) => node.type === 'list_item').map((node) => `- ${node.text}`).join('\n'),
           repeater: { raw: '+1d', frequency: { Daily: 1 } },
-          log_entries: [{ date: scheduled?.text?.slice(0, 10) ?? '2026-05-01', state: 'DONE' }],
+          log_entries: [{ date: timestampDate(scheduled?.text) ?? '2026-05-01', state: 'DONE' }],
           last_repeat: propertyDrawer?.properties.LAST_REPEAT?.match(/\[(\d{4}-\d{2}-\d{2})/)?.[1] ?? null
         });
       }
