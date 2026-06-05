@@ -1,0 +1,154 @@
+name: alpha-android-release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CI: "1"
+  JAVA_OPTS: "-Dsun.net.client.defaultConnectTimeout=60000 -Dsun.net.client.defaultReadTimeout=60000"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g -Dsun.net.client.defaultConnectTimeout=60000 -Dsun.net.client.defaultReadTimeout=60000"
+
+concurrency:
+  group: alpha-android-release
+  cancel-in-progress: false
+
+jobs:
+  alpha-android-release:
+    name: Publish alpha Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install mobile dependencies
+        working-directory: apps/mobile
+        run: npm install --legacy-peer-deps
+
+      - name: Prepare alpha version
+        id: version
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const cp = require('child_process');
+
+          const packagePath = 'apps/mobile/package.json';
+          const appPath = 'apps/mobile/app.json';
+          const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+          const appJson = JSON.parse(fs.readFileSync(appPath, 'utf8'));
+          const baseVersion = packageJson.version || appJson.expo?.version;
+
+          if (!baseVersion) {
+            throw new Error('Unable to determine the base app version.');
+          }
+
+          const tagPrefix = `v${baseVersion}-alpha.`;
+          const tags = cp.execFileSync('git', ['tag', '--list', `${tagPrefix}*`], { encoding: 'utf8' })
+            .split('\n')
+            .map((tag) => tag.trim())
+            .filter(Boolean);
+          const latestAlphaNumber = tags.reduce((max, tag) => {
+            const match = tag.match(new RegExp(`^${tagPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)$`));
+            return match ? Math.max(max, Number(match[1])) : max;
+          }, 0);
+          const alphaNumber = latestAlphaNumber + 1;
+          const versionName = `${baseVersion}-alpha.${alphaNumber}`;
+          const tagName = `v${versionName}`;
+          const versionCode = Number(process.env.GITHUB_RUN_NUMBER || '1');
+
+          packageJson.version = versionName;
+          appJson.expo = appJson.expo || {};
+          appJson.expo.version = versionName;
+          appJson.expo.android = appJson.expo.android || {};
+          appJson.expo.android.versionCode = versionCode;
+
+          fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          fs.writeFileSync(appPath, `${JSON.stringify(appJson, null, 2)}\n`);
+
+          const output = [
+            `base_version=${baseVersion}`,
+            `version_name=${versionName}`,
+            `version_code=${versionCode}`,
+            `tag_name=${tagName}`,
+          ].join('\n');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `${output}\n`);
+          console.log(`Prepared ${tagName} with Android versionCode ${versionCode}`);
+          NODE
+
+      - name: Typecheck mobile app
+        working-directory: apps/mobile
+        run: npm run typecheck
+
+      - name: Run UX tests
+        working-directory: apps/mobile
+        run: npm run test:ux
+
+      - name: Generate Android native project
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform android --clean
+
+      - name: Cache Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build Android APK
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleDebug
+
+      - name: Stage release asset
+        id: asset
+        run: |
+          set -euo pipefail
+          TAG_NAME="${{ steps.version.outputs.tag_name }}"
+          SOURCE_APK="apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk"
+          ASSET_NAME="postep-${TAG_NAME}-alpha.apk"
+          test -s "$SOURCE_APK"
+          cp "$SOURCE_APK" "$ASSET_NAME"
+          echo "asset_name=${ASSET_NAME}" >> "$GITHUB_OUTPUT"
+          echo "asset_path=${ASSET_NAME}" >> "$GITHUB_OUTPUT"
+          ls -lh "$ASSET_NAME"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.asset.outputs.asset_name }}
+          path: ${{ steps.asset.outputs.asset_path }}
+          if-no-files-found: error
+
+      - name: Publish GitHub alpha release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.version.outputs.tag_name }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          ASSET_PATH: ${{ steps.asset.outputs.asset_path }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG_NAME" "$ASSET_PATH" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Postep ${VERSION_NAME} (alpha)" \
+            --notes "Alpha channel Android APK for commit ${GITHUB_SHA}. Android versionCode: ${VERSION_CODE}." \
+            --prerelease
