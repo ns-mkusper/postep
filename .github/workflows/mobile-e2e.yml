@@ -198,18 +198,9 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
-            set -eu
-            SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-before" \
-              APK_PATH="${{ github.workspace }}/../postep-base/apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk" \
-              METRO_PORT=8081 \
-              EXPO_LOG=/tmp/postep-base-expo-screenshots.log \
-              bash "${{ github.workspace }}/../postep-base/apps/mobile/e2e/capture-android-screenshots.sh"
+            bash -euo pipefail -c 'SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-before" APK_PATH="${{ github.workspace }}/../postep-base/apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk" METRO_PORT=8081 EXPO_LOG=/tmp/postep-base-expo-screenshots.log bash "${{ github.workspace }}/../postep-base/apps/mobile/e2e/capture-android-screenshots.sh"'
             adb shell am force-stop com.postep.mobile || true
-            SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-after" \
-              APK_PATH="${{ github.workspace }}/apps/mobile/e2e-artifacts/apks/head-app-debug.apk" \
-              METRO_PORT=8081 \
-              EXPO_LOG=/tmp/postep-head-expo-screenshots.log \
-              bash "${{ github.workspace }}/apps/mobile/e2e/capture-android-screenshots.sh"
+            bash -euo pipefail -c 'SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-after" APK_PATH="${{ github.workspace }}/apps/mobile/e2e-artifacts/apks/head-app-debug.apk" METRO_PORT=8081 EXPO_LOG=/tmp/postep-head-expo-screenshots.log bash "${{ github.workspace }}/apps/mobile/e2e/capture-android-screenshots.sh"'
 
       - name: Compare Android emulator screenshots
         if: always()
