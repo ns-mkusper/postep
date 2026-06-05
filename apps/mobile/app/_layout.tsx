@@ -19,14 +19,14 @@ export default function RootLayout() {
           <Drawer
             initialRouteName="library/index"
             screenOptions={{
-              headerTintColor: '#F5F6FA',
-              headerStyle: { backgroundColor: '#111217' },
-              headerTitleStyle: { fontWeight: '800' },
-              drawerStyle: { backgroundColor: '#17191F' },
-              drawerActiveTintColor: '#F2F4FC',
-              drawerInactiveTintColor: '#A7ABB8',
-              drawerActiveBackgroundColor: '#2A2C36',
-              sceneContainerStyle: { backgroundColor: '#111217' }
+              headerTintColor: '#F2F5EC',
+              headerStyle: { backgroundColor: '#071008' },
+              headerTitleStyle: { fontWeight: '800', fontSize: 22 },
+              drawerStyle: { backgroundColor: '#091108' },
+              drawerActiveTintColor: '#F2F5EC',
+              drawerInactiveTintColor: '#A6AEA0',
+              drawerActiveBackgroundColor: '#1E271B',
+              sceneContainerStyle: { backgroundColor: '#071008' }
             }}
           >
             <Drawer.Screen name="library/index" options={{ title: 'Notes', headerShown: false }} />

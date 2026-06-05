@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -7,32 +7,36 @@ import {
   RefreshControl,
   TouchableOpacity,
   Modal,
-  Pressable
-} from 'react-native';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+  Pressable,
+} from "react-native";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { loadAgendaSnapshot, setAgendaStatus, AgendaItem } from '@postep/bridge';
-import { useBridgeConfig } from '../../store/orgConfig';
-import { useBridgeEvent } from '../../hooks/useBridgeEvent';
+import {
+  loadAgendaSnapshot,
+  setAgendaStatus,
+  AgendaItem,
+} from "@postep/bridge";
+import { useBridgeConfig } from "../../store/orgConfig";
+import { useBridgeEvent } from "../../hooks/useBridgeEvent";
 
 const STATUS_OPTIONS: Array<{ label: string; value: string }> = [
-  { label: 'TODO (t)', value: 'TODO' },
-  { label: 'WAITING (w)', value: 'WAITING' },
-  { label: 'INPROG-TODO (i)', value: 'INPROG-TODO' },
-  { label: 'HW (h)', value: 'HW' },
-  { label: 'STUDY (s)', value: 'STUDY' },
-  { label: 'SOMEDAY', value: 'SOMEDAY' },
-  { label: 'READ (r)', value: 'READ' },
-  { label: 'PROJ (p)', value: 'PROJ' },
-  { label: 'CONTACT (c)', value: 'CONTACT' },
-  { label: 'DONE (d)', value: 'DONE' },
-  { label: 'CANCELLED (C)', value: 'CANCELLED' }
+  { label: "TODO (t)", value: "TODO" },
+  { label: "WAITING (w)", value: "WAITING" },
+  { label: "INPROG-TODO (i)", value: "INPROG-TODO" },
+  { label: "HW (h)", value: "HW" },
+  { label: "STUDY (s)", value: "STUDY" },
+  { label: "SOMEDAY", value: "SOMEDAY" },
+  { label: "READ (r)", value: "READ" },
+  { label: "PROJ (p)", value: "PROJ" },
+  { label: "CONTACT (c)", value: "CONTACT" },
+  { label: "DONE (d)", value: "DONE" },
+  { label: "CANCELLED (C)", value: "CANCELLED" },
 ];
 
 function localDateString(date = new Date()) {
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
@@ -51,7 +55,7 @@ function ageLabel(item: AgendaItem, today: string) {
     return `${age}d overdue`;
   }
   if (age === 0) {
-    return 'Today';
+    return "Today";
   }
   return `In ${Math.abs(age)}d`;
 }
@@ -75,32 +79,54 @@ function groupByDay(items: AgendaItem[]) {
     upcomingMap[item.date].push(item);
   }
 
-  const groups: Array<{ date: string; title: string; list: AgendaItem[]; tone?: 'missed' | 'today' | 'upcoming' | 'inbox' }> = [];
+  const groups: Array<{
+    date: string;
+    title: string;
+    list: AgendaItem[];
+    tone?: "missed" | "today" | "upcoming" | "inbox";
+  }> = [];
   if (todayItems.length > 0) {
-    groups.push({ date: today, title: 'Today', list: todayItems, tone: 'today' });
+    groups.push({
+      date: today,
+      title: "Today",
+      list: todayItems,
+      tone: "today",
+    });
   }
   if (missed.length > 0) {
-    groups.push({ date: 'missed', title: `Missed · ${missed.length} overdue`, list: missed, tone: 'missed' });
+    groups.push({
+      date: "missed",
+      title: `Missed · ${missed.length} overdue`,
+      list: missed,
+      tone: "missed",
+    });
   }
-  for (const [date, list] of Object.entries(upcomingMap).sort(([left], [right]) => left.localeCompare(right))) {
-    groups.push({ date, title: date, list, tone: 'upcoming' });
+  for (const [date, list] of Object.entries(upcomingMap).sort(
+    ([left], [right]) => left.localeCompare(right),
+  )) {
+    groups.push({ date, title: date, list, tone: "upcoming" });
   }
   if (inbox.length > 0) {
-    groups.push({ date: 'unscheduled', title: 'Inbox', list: inbox, tone: 'inbox' });
+    groups.push({
+      date: "unscheduled",
+      title: "Inbox",
+      list: inbox,
+      tone: "inbox",
+    });
   }
   return groups;
 }
 
 function cleanOrgText(text: string) {
   return text
-    .replace(/\[\[([^\]]+)\]\[([^\]]+)\]\]/g, '$2')
-    .replace(/\[\[([^\]]+)\]\]/g, '$1')
-    .replace(/\s+/g, ' ')
+    .replace(/\[\[([^\]]+)\]\[([^\]]+)\]\]/g, "$2")
+    .replace(/\[\[([^\]]+)\]\]/g, "$1")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
 function cleanAgendaContext(context: string) {
-  const lines = context.split('\n');
+  const lines = context.split("\n");
   const visible: string[] = [];
   let inDrawer = false;
   let inCode = false;
@@ -142,7 +168,16 @@ function cleanAgendaContext(context: string) {
       continue;
     }
     if (/^\|.*\|$/.test(line)) {
-      visible.push(cleanOrgText(line.replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim()).filter(Boolean).join(' · ')));
+      visible.push(
+        cleanOrgText(
+          line
+            .replace(/^\||\|$/g, "")
+            .split("|")
+            .map((cell) => cell.trim())
+            .filter(Boolean)
+            .join(" · "),
+        ),
+      );
       continue;
     }
     visible.push(cleanOrgText(line));
@@ -156,12 +191,12 @@ function formatRepeater(item: AgendaItem) {
     return null;
   }
   const unit = item.repeater.unit.toLowerCase();
-  return `Every ${item.repeater.amount} ${unit}${item.repeater.amount === 1 ? '' : 's'}`;
+  return `Every ${item.repeater.amount} ${unit}${item.repeater.amount === 1 ? "" : "s"}`;
 }
 
 function formatScheduleLabel(item: AgendaItem) {
   const parts = [item.date, item.time].filter(Boolean);
-  return parts.length > 0 ? parts.join(' ') : item.kind;
+  return parts.length > 0 ? parts.join(" ") : item.kind;
 }
 
 export default function AgendaScreen() {
@@ -170,17 +205,24 @@ export default function AgendaScreen() {
   const [pickerItem, setPickerItem] = useState<AgendaItem | null>(null);
 
   const agendaQuery = useQuery({
-    queryKey: ['agenda', config.roots.join(':'), config.roamRoots?.join(':') ?? ''],
+    queryKey: [
+      "agenda",
+      config.roots.join(":"),
+      config.roamRoots?.join(":") ?? "",
+    ],
     queryFn: () =>
       config.roots.length === 0
         ? Promise.resolve({ items: [], habits: [] })
-        : Promise.resolve(loadAgendaSnapshot(config))
+        : Promise.resolve(loadAgendaSnapshot(config)),
   });
 
-  useBridgeEvent('agendaChanged', () => agendaQuery.refetch());
-  useBridgeEvent('rootsChanged', () => agendaQuery.refetch());
+  useBridgeEvent("agendaChanged", () => agendaQuery.refetch());
+  useBridgeEvent("rootsChanged", () => agendaQuery.refetch());
 
-  const groups = useMemo(() => groupByDay(agendaQuery.data?.items ?? []), [agendaQuery.data?.items]);
+  const groups = useMemo(
+    () => groupByDay(agendaQuery.data?.items ?? []),
+    [agendaQuery.data?.items],
+  );
 
   const applyStatus = async (item: AgendaItem, status: string) => {
     if (config.roots.length === 0) {
@@ -192,17 +234,22 @@ export default function AgendaScreen() {
         roamRoots: config.roamRoots,
         path: item.path,
         headlineLine: item.headline_line,
-        status
+        status,
       });
-      queryClient.setQueryData(['agenda', config.roots.join(':'), config.roamRoots?.join(':') ?? ''], snapshot);
+      queryClient.setQueryData(
+        ["agenda", config.roots.join(":"), config.roamRoots?.join(":") ?? ""],
+        snapshot,
+      );
     } catch (error) {
-      console.warn('Failed to set agenda status', error);
+      console.warn("Failed to set agenda status", error);
     }
   };
 
   const currentStatusLabel = (item: AgendaItem) => {
     const keyword = item.todo_keyword ?? item.kind;
-    const match = STATUS_OPTIONS.find((opt) => opt.value.toUpperCase() === keyword.toUpperCase());
+    const match = STATUS_OPTIONS.find(
+      (opt) => opt.value.toUpperCase() === keyword.toUpperCase(),
+    );
     return match ? match.value : keyword;
   };
 
@@ -214,35 +261,68 @@ export default function AgendaScreen() {
         data={groups}
         keyExtractor={(item) => item.date}
         refreshControl={
-          <RefreshControl refreshing={agendaQuery.isRefetching} onRefresh={() => agendaQuery.refetch()} />
+          <RefreshControl
+            refreshing={agendaQuery.isRefetching}
+            onRefresh={() => agendaQuery.refetch()}
+          />
         }
         renderItem={({ item }) => (
           <View style={styles.section}>
-            <Text style={[styles.sectionTitle, item.tone === 'today' && styles.todayTitle, item.tone === 'missed' && styles.missedTitle]}>{item.title}</Text>
+            <Text
+              style={[
+                styles.sectionTitle,
+                item.tone === "today" && styles.todayTitle,
+                item.tone === "missed" && styles.missedTitle,
+              ]}
+            >
+              {item.title}
+            </Text>
             {item.list.map((agenda) => {
               const contextLines = cleanAgendaContext(agenda.context);
               const repeater = formatRepeater(agenda);
               const age = ageLabel(agenda, localDateString());
               return (
-                <View key={`${agenda.path}:${agenda.headline_line}`} testID={`agenda-card-${agenda.headline_line}`} style={styles.cardRow}>
+                <View
+                  key={`${agenda.path}:${agenda.headline_line}`}
+                  testID={`agenda-card-${agenda.headline_line}`}
+                  style={styles.cardRow}
+                >
                   <View style={styles.cardHeaderRow}>
                     <TouchableOpacity
                       style={styles.statusChip}
                       onPress={() => setPickerItem(agenda)}
                       testID={`agenda-status-${agenda.headline_line}`}
                     >
-                      <Text style={styles.statusChipText}>{currentStatusLabel(agenda)}</Text>
+                      <Text style={styles.statusChipText}>
+                        {currentStatusLabel(agenda)}
+                      </Text>
                     </TouchableOpacity>
                     <Text style={styles.kindChip}>{agenda.kind}</Text>
-                    <Text style={styles.dateChip}>{formatScheduleLabel(agenda)}</Text>
-                    {age && <Text style={agenda.date && agenda.date < localDateString() ? styles.overdueChip : styles.ageChip}>{age}</Text>}
-                    {repeater && <Text style={styles.repeaterChip}>{repeater}</Text>}
+                    <Text style={styles.dateChip}>
+                      {formatScheduleLabel(agenda)}
+                    </Text>
+                    {age && (
+                      <Text
+                        style={
+                          agenda.date && agenda.date < localDateString()
+                            ? styles.overdueChip
+                            : styles.ageChip
+                        }
+                      >
+                        {age}
+                      </Text>
+                    )}
+                    {repeater && (
+                      <Text style={styles.repeaterChip}>{repeater}</Text>
+                    )}
                   </View>
                   <Text style={styles.cardTitle}>{agenda.title}</Text>
                   {contextLines.length > 0 && (
                     <View style={styles.contextBlock}>
                       {contextLines.map((line, index) => (
-                        <Text key={`${line}:${index}`} style={styles.cardMeta}>{line}</Text>
+                        <Text key={`${line}:${index}`} style={styles.cardMeta}>
+                          {line}
+                        </Text>
                       ))}
                     </View>
                   )}
@@ -253,7 +333,9 @@ export default function AgendaScreen() {
         )}
         ListEmptyComponent={() => (
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>No agenda items. Add scheduled TODOs in your Org files.</Text>
+            <Text style={styles.emptyText}>
+              No agenda items. Add scheduled TODOs in your Org files.
+            </Text>
           </View>
         )}
       />
@@ -264,7 +346,10 @@ export default function AgendaScreen() {
         animationType="fade"
         onRequestClose={() => setPickerItem(null)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setPickerItem(null)}>
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setPickerItem(null)}
+        >
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Set status</Text>
             {pickerItem &&
@@ -290,146 +375,153 @@ export default function AgendaScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#050607'
+    backgroundColor: "#071008",
   },
   list: {
-    flex: 1
+    flex: 1,
   },
   section: {
-    paddingHorizontal: 16,
-    paddingVertical: 20
+    paddingHorizontal: 12,
+    paddingVertical: 18,
   },
   sectionTitle: {
-    fontSize: 14,
-    color: '#7A8499',
-    textTransform: 'uppercase',
+    fontSize: 16,
+    color: "#9BA394",
+    textTransform: "uppercase",
     marginBottom: 12,
-    fontWeight: '800'
+    fontWeight: "800",
+    letterSpacing: 0.5,
   },
-  todayTitle: { color: '#DDE6FF' },
-  missedTitle: { color: '#F7B4B4' },
+  todayTitle: { color: "#E5EBDD" },
+  missedTitle: { color: "#E8B7A8" },
   cardRow: {
     marginBottom: 12,
-    backgroundColor: '#1A1D23',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#303541',
-    padding: 16
+    backgroundColor: "#091108",
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: "#3D4638",
+    padding: 16,
   },
   cardHeaderRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 7,
     marginBottom: 12,
-    alignItems: 'center'
+    alignItems: "center",
   },
   statusChip: {
-    backgroundColor: '#B8C6F4',
-    borderRadius: 12,
+    backgroundColor: "#394A23",
+    borderRadius: 11,
     paddingHorizontal: 10,
-    paddingVertical: 6
+    paddingVertical: 5,
   },
   statusChipText: {
-    color: '#111217',
-    fontWeight: '900',
-    fontSize: 12
+    color: "#F1F5E8",
+    fontWeight: "900",
+    fontSize: 12,
   },
   kindChip: {
-    color: '#DCE3F7',
-    backgroundColor: '#283044',
-    borderRadius: 12,
+    color: "#DDE5D4",
+    backgroundColor: "#1E271B",
+    borderRadius: 11,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 5,
     fontSize: 12,
-    overflow: 'hidden',
-    fontWeight: '800'
+    overflow: "hidden",
+    fontWeight: "800",
   },
   dateChip: {
-    color: '#C9D3EF',
-    backgroundColor: '#222838',
-    borderRadius: 12,
+    color: "#C9D1C0",
+    backgroundColor: "#1E271B",
+    borderRadius: 11,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 5,
     fontSize: 12,
-    overflow: 'hidden'
+    overflow: "hidden",
   },
   ageChip: {
-    color: '#C9D3EF',
-    backgroundColor: '#222838',
-    borderRadius: 12,
+    color: "#C9D1C0",
+    backgroundColor: "#1E271B",
+    borderRadius: 11,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 5,
     fontSize: 12,
-    overflow: 'hidden',
-    fontWeight: '800'
+    overflow: "hidden",
+    fontWeight: "800",
   },
   overdueChip: {
-    color: '#FFD0D0',
-    backgroundColor: '#3B2024',
-    borderRadius: 12,
+    color: "#F0C0B0",
+    backgroundColor: "#352019",
+    borderRadius: 11,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 5,
     fontSize: 12,
-    overflow: 'hidden',
-    fontWeight: '900'
+    overflow: "hidden",
+    fontWeight: "900",
   },
   repeaterChip: {
-    color: '#BDF7D3',
-    backgroundColor: '#173828',
-    borderRadius: 12,
+    color: "#CDE8B4",
+    backgroundColor: "#24371B",
+    borderRadius: 11,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 5,
     fontSize: 12,
-    overflow: 'hidden',
-    fontWeight: '800'
+    overflow: "hidden",
+    fontWeight: "800",
   },
   cardTitle: {
-    color: '#F3F4F8',
-    fontSize: 20,
-    fontWeight: '800',
-    marginBottom: 8
+    color: "#F2F5EC",
+    fontSize: 26,
+    lineHeight: 32,
+    fontWeight: "800",
+    marginBottom: 8,
   },
   contextBlock: {
-    gap: 4
+    gap: 5,
   },
   cardMeta: {
-    color: '#AAB1C4',
-    fontSize: 14,
-    lineHeight: 20
+    color: "#C6CDBF",
+    fontSize: 19,
+    lineHeight: 27,
   },
   empty: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 40
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 40,
   },
   emptyText: {
-    color: '#71788D'
+    color: "#8C9486",
+    fontSize: 18,
+    lineHeight: 25,
+    textAlign: "center",
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    padding: 24
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "center",
+    padding: 24,
   },
   modalContent: {
-    backgroundColor: '#182030',
-    borderRadius: 12,
-    paddingVertical: 16
+    backgroundColor: "#111A10",
+    borderRadius: 18,
+    paddingVertical: 16,
+    borderWidth: 1,
+    borderColor: "#3D4638",
   },
   modalTitle: {
-    color: '#F2F4FE',
-    fontSize: 16,
-    fontWeight: '600',
+    color: "#F2F5EC",
+    fontSize: 20,
+    fontWeight: "700",
     paddingHorizontal: 20,
-    paddingBottom: 12
+    paddingBottom: 12,
   },
   modalOption: {
     paddingHorizontal: 20,
-    paddingVertical: 12
+    paddingVertical: 13,
   },
   modalOptionText: {
-    color: '#D7DFF6',
-    fontSize: 14
-  }
+    color: "#DDE5D4",
+    fontSize: 17,
+  },
 });

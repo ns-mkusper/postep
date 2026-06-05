@@ -1,30 +1,44 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity } from 'react-native';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import React, { useMemo, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TextInput,
+  TouchableOpacity,
+} from "react-native";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { addHabit, deleteHabit, loadAgendaSnapshot } from '@postep/bridge';
-import { useBridgeConfig } from '../../store/orgConfig';
-import { useBridgeEvent } from '../../hooks/useBridgeEvent';
+import { addHabit, deleteHabit, loadAgendaSnapshot } from "@postep/bridge";
+import { useBridgeConfig } from "../../store/orgConfig";
+import { useBridgeEvent } from "../../hooks/useBridgeEvent";
 
 export default function HabitsScreen() {
   const config = useBridgeConfig();
   const queryClient = useQueryClient();
-  const [title, setTitle] = useState('New habit');
-  const [scheduled, setScheduled] = useState('2026-05-15 Fri 08:00');
-  const agendaKey = ['agenda', config.roots.join(':'), config.roamRoots?.join(':') ?? ''];
+  const [title, setTitle] = useState("New habit");
+  const [scheduled, setScheduled] = useState("2026-05-15 Fri 08:00");
+  const agendaKey = [
+    "agenda",
+    config.roots.join(":"),
+    config.roamRoots?.join(":") ?? "",
+  ];
 
   const agendaQuery = useQuery({
     queryKey: agendaKey,
     queryFn: () =>
       config.roots.length === 0
         ? Promise.resolve({ items: [], habits: [] })
-        : Promise.resolve(loadAgendaSnapshot(config))
+        : Promise.resolve(loadAgendaSnapshot(config)),
   });
 
-  useBridgeEvent('agendaChanged', () => agendaQuery.refetch());
-  useBridgeEvent('rootsChanged', () => agendaQuery.refetch());
+  useBridgeEvent("agendaChanged", () => agendaQuery.refetch());
+  useBridgeEvent("rootsChanged", () => agendaQuery.refetch());
 
-  const habits = useMemo(() => agendaQuery.data?.habits ?? [], [agendaQuery.data?.habits]);
+  const habits = useMemo(
+    () => agendaQuery.data?.habits ?? [],
+    [agendaQuery.data?.habits],
+  );
 
   const handleAddHabit = () => {
     if (config.roots.length === 0 || !title.trim()) {
@@ -34,10 +48,10 @@ export default function HabitsScreen() {
       roots: config.roots,
       roamRoots: config.roamRoots,
       title: title.trim(),
-      scheduled: scheduled.trim() || '2026-05-15 Fri 08:00'
+      scheduled: scheduled.trim() || "2026-05-15 Fri 08:00",
     });
     queryClient.setQueryData(agendaKey, snapshot);
-    setTitle('New habit');
+    setTitle("New habit");
   };
 
   const handleDeleteHabit = (habitTitle: string) => {
@@ -48,7 +62,7 @@ export default function HabitsScreen() {
       roots: config.roots,
       roamRoots: config.roamRoots,
       path: `${config.roots[0]}/sample-01.org`,
-      title: habitTitle.replace(/^TODO\s+/, '')
+      title: habitTitle.replace(/^TODO\s+/, ""),
     });
     queryClient.setQueryData(agendaKey, snapshot);
   };
@@ -73,7 +87,11 @@ export default function HabitsScreen() {
           placeholder="2026-05-15 Fri 08:00"
           placeholderTextColor="#6B7285"
         />
-        <TouchableOpacity testID="habit-add-button" style={styles.addButton} onPress={handleAddHabit}>
+        <TouchableOpacity
+          testID="habit-add-button"
+          style={styles.addButton}
+          onPress={handleAddHabit}
+        >
           <Text style={styles.buttonText}>Add Habit</Text>
         </TouchableOpacity>
       </View>
@@ -86,13 +104,15 @@ export default function HabitsScreen() {
         contentContainerStyle={{ padding: 16 }}
         renderItem={({ item }) => (
           <View style={styles.card} testID="habit-card">
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <View
+              style={{ flexDirection: "row", justifyContent: "space-between" }}
+            >
               <Text style={styles.title}>{item.title}</Text>
-              <Text style={styles.streak}>{item.last_repeat ?? '—'}</Text>
+              <Text style={styles.streak}>{item.last_repeat ?? "—"}</Text>
             </View>
             <Text style={styles.description}>{item.description}</Text>
             <TouchableOpacity
-              testID={`habit-delete-${item.title.replace(/\s+/g, '-').toLowerCase()}`}
+              testID={`habit-delete-${item.title.replace(/\s+/g, "-").toLowerCase()}`}
               style={styles.deleteButton}
               onPress={() => handleDeleteHabit(item.title)}
             >
@@ -102,7 +122,9 @@ export default function HabitsScreen() {
         )}
         ListEmptyComponent={() => (
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>Habits will appear after parsing org-habit entries.</Text>
+            <Text style={styles.emptyText}>
+              Habits will appear after parsing org-habit entries.
+            </Text>
           </View>
         )}
       />
@@ -113,79 +135,98 @@ export default function HabitsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0C0D0F'
+    backgroundColor: "#071008",
   },
   editor: {
     padding: 16,
-    backgroundColor: '#151A22',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.08)'
+    backgroundColor: "#091108",
+    borderBottomWidth: 1,
+    borderBottomColor: "#303B2D",
   },
   editorTitle: {
-    color: '#F0F2F9',
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 8
+    color: "#F0F4EA",
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: "800",
+    marginBottom: 12,
   },
   input: {
-    backgroundColor: '#0B0F16',
-    color: '#F5F6FA',
-    padding: 10,
-    borderRadius: 10,
-    marginBottom: 8
+    backgroundColor: "#0C150B",
+    color: "#F2F5EC",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#303B2D",
+    fontSize: 18,
+    lineHeight: 24,
   },
   addButton: {
-    backgroundColor: '#4C6EF5',
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: 'center'
+    backgroundColor: "#4D5F31",
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: "center",
   },
   buttonText: {
-    color: '#FFFFFF',
-    fontWeight: '700'
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: 17,
   },
   list: {
     flex: 1,
-    backgroundColor: '#0C0D0F'
+    backgroundColor: "#071008",
   },
   card: {
-    backgroundColor: '#1F2430',
+    backgroundColor: "#091108",
     padding: 16,
-    borderRadius: 12,
-    marginBottom: 12
+    borderRadius: 18,
+    marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: "#3D4638",
   },
   title: {
-    color: '#F0F2F9',
-    fontSize: 16,
-    fontWeight: '600'
+    color: "#F2F5EC",
+    fontSize: 26,
+    lineHeight: 32,
+    fontWeight: "800",
+    flex: 1,
+    paddingRight: 10,
   },
   streak: {
-    color: '#A5ADC4',
-    fontSize: 12
+    color: "#9BA394",
+    fontSize: 15,
+    lineHeight: 22,
   },
   description: {
-    marginTop: 8,
-    color: '#C1C7D9'
+    marginTop: 10,
+    color: "#C6CDBF",
+    fontSize: 19,
+    lineHeight: 27,
   },
   deleteButton: {
-    marginTop: 12,
-    alignSelf: 'flex-start',
-    backgroundColor: '#3B1F2A',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6
+    marginTop: 14,
+    alignSelf: "flex-start",
+    backgroundColor: "#352019",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   deleteText: {
-    color: '#FDA4AF',
-    fontWeight: '700'
+    color: "#F0C0B0",
+    fontWeight: "800",
+    fontSize: 15,
   },
   empty: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 40,
   },
   emptyText: {
-    color: '#6B7285'
-  }
+    color: "#8C9486",
+    fontSize: 18,
+    lineHeight: 25,
+    textAlign: "center",
+  },
 });
