@@ -24,12 +24,60 @@ adb_cmd() {
   fi
 }
 
+kill_pid_and_children() {
+  local pid="$1"
+
+  if [[ -z "$pid" ]]; then
+    return 0
+  fi
+
+  kill -- "-$pid" >/dev/null 2>&1 || true
+  if command -v pkill >/dev/null 2>&1; then
+    pkill -TERM -P "$pid" >/dev/null 2>&1 || true
+  fi
+  kill "$pid" >/dev/null 2>&1 || true
+
+  for _ in $(seq 1 20); do
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.25
+  done
+
+  kill -KILL -- "-$pid" >/dev/null 2>&1 || true
+  if command -v pkill >/dev/null 2>&1; then
+    pkill -KILL -P "$pid" >/dev/null 2>&1 || true
+  fi
+  kill -KILL "$pid" >/dev/null 2>&1 || true
+}
+
+kill_metro_port() {
+  if command -v lsof >/dev/null 2>&1; then
+    while read -r pid; do
+      if [[ -n "$pid" && "$pid" != "$$" ]]; then
+        log "Stopping process $pid listening on Metro port $METRO_PORT"
+        kill "$pid" >/dev/null 2>&1 || true
+      fi
+    done < <(lsof -tiTCP:"$METRO_PORT" -sTCP:LISTEN 2>/dev/null || true)
+  elif command -v fuser >/dev/null 2>&1; then
+    fuser -k "${METRO_PORT}/tcp" >/dev/null 2>&1 || true
+  fi
+
+  if command -v pkill >/dev/null 2>&1; then
+    pkill -TERM -f "expo start .*--port ${METRO_PORT}" >/dev/null 2>&1 || true
+    pkill -TERM -f "expo .*--port ${METRO_PORT}" >/dev/null 2>&1 || true
+  fi
+}
+
 cleanup() {
   if [[ -n "${METRO_PID:-}" ]]; then
-    kill "$METRO_PID" >/dev/null 2>&1 || true
+    kill_pid_and_children "$METRO_PID"
+  fi
+  if [[ "${CI:-}" == "1" ]]; then
+    kill_metro_port
   fi
   if [[ -n "${MAC_FORWARD_PID:-}" ]]; then
-    kill "$MAC_FORWARD_PID" >/dev/null 2>&1 || true
+    kill_pid_and_children "$MAC_FORWARD_PID"
   fi
   if [[ -f "$EXPO_LOG" ]]; then
     log "Expo log tail"
@@ -112,9 +160,16 @@ for _ in $(seq 1 60); do
 done
 
 log "Starting Metro"
+if [[ "${CI:-}" == "1" ]]; then
+  kill_metro_port
+fi
 start_mac_port_forward
 adb_cmd reverse "tcp:${METRO_PORT}" "tcp:${METRO_PORT}" || true
-EXPO_PUBLIC_POSTEP_E2E=1 CI=1 npx expo start --clear --host localhost --port "$METRO_PORT" > "$EXPO_LOG" 2>&1 &
+if command -v setsid >/dev/null 2>&1; then
+  setsid env EXPO_PUBLIC_POSTEP_E2E=1 CI=1 npx expo start --clear --host localhost --port "$METRO_PORT" > "$EXPO_LOG" 2>&1 &
+else
+  EXPO_PUBLIC_POSTEP_E2E=1 CI=1 npx expo start --clear --host localhost --port "$METRO_PORT" > "$EXPO_LOG" 2>&1 &
+fi
 METRO_PID=$!
 
 for _ in $(seq 1 90); do
