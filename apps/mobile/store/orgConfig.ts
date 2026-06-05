@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { OrgBridgeConfig, emitBridgeEvent, setRoots } from '@postep/bridge';
+import { OrgBridgeConfig, E2E_ORG_ROOT, emitBridgeEvent, isE2EMode, setRoots } from '@postep/bridge';
 
 interface OrgConfigState {
   roots: string[];
@@ -11,14 +11,18 @@ interface OrgConfigState {
   reset(): void;
 }
 
+const isE2E = process.env.EXPO_PUBLIC_POSTEP_E2E === '1' || isE2EMode();
+const initialRoots = isE2E ? [E2E_ORG_ROOT] : [];
+const initialRoamRoots = isE2E ? [E2E_ORG_ROOT] : [];
+
 const syncNative = (roots: string[], roamRoots: string[]) => {
   setRoots({ roots, ...(roamRoots.length > 0 ? { roamRoots } : {}) });
   emitBridgeEvent('rootsChanged');
 };
 
 export const useOrgConfig = create<OrgConfigState>((set) => ({
-  roots: [],
-  roamRoots: [],
+  roots: initialRoots,
+  roamRoots: initialRoamRoots,
   addRoot: (path: string) =>
     set((state) => {
       const trimmed = path.trim();

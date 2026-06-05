@@ -118,6 +118,14 @@ pub struct OrgDocumentPayload {
     pub slate: serde_json::Value,
 }
 
+#[napi(object)]
+pub struct UpdateDocumentParams {
+    pub roots: Vec<String>,
+    pub roam_roots: Option<Vec<String>>,
+    pub path: String,
+    pub raw: String,
+}
+
 #[napi]
 pub fn ping() -> String {
     "postep-org-bridge".to_owned()
@@ -211,6 +219,34 @@ pub fn load_document(config: OrgBridgeConfig, path: String) -> napi::Result<OrgD
     let doc = service
         .get_document(&path)
         .with_context(|| format!("document not loaded: {}", path))
+        .map_err(to_napi_error)?;
+    let slate = service.slate_nodes(&path).map_err(to_napi_error)?;
+    let slate_json = serde_json::to_value(slate).map_err(|err| to_napi_error(err.into()))?;
+    Ok(OrgDocumentPayload {
+        path,
+        raw: doc.raw().to_string(),
+        slate: slate_json,
+    })
+}
+
+#[napi]
+pub fn update_document(params: UpdateDocumentParams) -> napi::Result<OrgDocumentPayload> {
+    let UpdateDocumentParams {
+        roots,
+        roam_roots,
+        path,
+        raw,
+    } = params;
+    let roam_vec = roam_roots.clone().unwrap_or_default();
+    ensure_roots_registered(&roots, &roam_vec).map_err(to_napi_error)?;
+    let service = build_service(&roots, &roam_vec).map_err(to_napi_error)?;
+    service
+        .update_document(&path, raw)
+        .with_context(|| format!("failed to update document: {}", path))
+        .map_err(to_napi_error)?;
+    let doc = service
+        .get_document(&path)
+        .with_context(|| format!("document not loaded after update: {}", path))
         .map_err(to_napi_error)?;
     let slate = service.slate_nodes(&path).map_err(to_napi_error)?;
     let slate_json = serde_json::to_value(slate).map_err(|err| to_napi_error(err.into()))?;
