@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:ux": "tsx --test __tests__/*.test.ts",
+    "benchmark:ux": "UX_BENCH_RUNS=100 UX_BENCH_WARMUPS=10 tsx --test __tests__/editorFrontendBenchmarks.test.ts --test-reporter=spec",
     "e2e:web:build": "EXPO_PUBLIC_POSTEP_E2E=1 expo export --platform web --output-dir dist-e2e-web",
     "e2e:web": "playwright test e2e/web",
     "e2e:android:prebuild": "EXPO_PUBLIC_POSTEP_E2E=1 CI=1 expo prebuild --platform android --clean",
