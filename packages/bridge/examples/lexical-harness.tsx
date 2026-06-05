@@ -1,40 +1,27 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { createEditor, Descendant } from 'slate';
-import { Slate, withReact } from 'slate-react';
+import { createEditor } from 'lexical';
 
 import { ping, loadAgendaSnapshot, AgendaSnapshot } from '../src/index.js';
 
-function buildDoc(snapshot: AgendaSnapshot, bridgePing: string): Descendant[] {
+type HarnessNode = { type: 'paragraph'; children: Array<{ text: string }> };
+
+function buildDoc(snapshot: AgendaSnapshot, bridgePing: string): HarnessNode[] {
   const agendaLines = snapshot.items.map((item) => `${item.kind}: ${item.title}`);
   const habitLines = snapshot.habits.map((habit) => `Habit: ${habit.title}`);
 
   return [
-    {
-      type: 'paragraph',
-      children: [{ text: bridgePing }]
-    },
-    {
-      type: 'paragraph',
-      children: [{ text: 'Agenda Preview' }]
-    },
-    ...agendaLines.map((line) => ({
-      type: 'paragraph',
-      children: [{ text: line }]
-    })),
-    {
-      type: 'paragraph',
-      children: [{ text: 'Habits Preview' }]
-    },
-    ...habitLines.map((line) => ({
-      type: 'paragraph',
-      children: [{ text: line }]
-    }))
+    { type: 'paragraph', children: [{ text: bridgePing }] },
+    { type: 'paragraph', children: [{ text: 'Agenda Preview' }] },
+    ...agendaLines.map((line) => ({ type: 'paragraph' as const, children: [{ text: line }] })),
+    { type: 'paragraph', children: [{ text: 'Habits Preview' }] },
+    ...habitLines.map((line) => ({ type: 'paragraph' as const, children: [{ text: line }] }))
   ];
 }
 
 async function main() {
-  const editor = withReact(createEditor());
+  const namespace = 'postep-bridge-harness';
+  createEditor({ namespace });
 
   let snapshot: AgendaSnapshot;
   let bridgePing = 'bridge-not-built';
@@ -43,7 +30,7 @@ async function main() {
     bridgePing = ping();
     snapshot = loadAgendaSnapshot({ roots: [] });
   } catch (error) {
-    console.warn('Falling back to mock snapshot for Slate harness:', error);
+    console.warn('Falling back to mock snapshot for Lexical harness:', error);
     snapshot = {
       items: [
         {
@@ -67,16 +54,16 @@ async function main() {
   const doc = buildDoc(snapshot, bridgePing);
 
   const markup = renderToStaticMarkup(
-    <Slate editor={editor} value={doc} onChange={() => {}}>
-      <pre>{JSON.stringify(snapshot, null, 2)}</pre>
-    </Slate>
+    <section data-lexical-namespace={namespace}>
+      <pre>{JSON.stringify(doc, null, 2)}</pre>
+    </section>
   );
 
-  console.log('\nSlate Harness Rendered Markup:\n');
+  console.log('\nLexical Harness Rendered Markup:\n');
   console.log(markup);
 }
 
 main().catch((error) => {
-  console.error('Failed to run Slate harness', error);
+  console.error('Failed to run Lexical harness', error);
   process.exitCode = 1;
 });

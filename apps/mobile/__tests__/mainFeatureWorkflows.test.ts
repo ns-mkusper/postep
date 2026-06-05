@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { performance } from 'node:perf_hooks';
 
 import type { AgendaItem, Habit, RoamGraph } from '@postep/bridge';
-import { createBlockViewModels } from '../lib/orgSlateModel';
+import { createBlockViewModels } from '../lib/orgLexicalModel';
 import {
   addHabitBlock,
   appendCapture,

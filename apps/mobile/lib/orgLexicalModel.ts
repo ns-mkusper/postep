@@ -1,6 +1,16 @@
-import type { Descendant } from 'slate';
+import type { LexicalNode } from '@postep/bridge';
 
-import type { SlateNode } from '@postep/bridge';
+export type LexicalProjectionNode =
+  | { type: 'heading'; depth: number; children: Array<{ text: string }> }
+  | { type: 'list_item'; depth: number; ordered: boolean; checked: boolean | null; children: Array<{ text: string }> }
+  | { type: 'planning'; children: Array<{ text: string }> }
+  | { type: 'property_drawer'; children: Array<{ text: string }> }
+  | { type: 'drawer'; children: Array<{ text: string }> }
+  | { type: 'code_block'; language?: string | null; children: Array<{ text: string }> }
+  | { type: 'table'; rows: string[][]; children: Array<{ text: string }> }
+  | { type: 'directive'; children: Array<{ text: string }> }
+  | { type: 'horizontal_rule'; children: Array<{ text: string }> }
+  | { type: 'paragraph'; children: Array<{ text: string }> };
 
 export interface ConversionOptions {
   outlineOnly: boolean;
@@ -9,8 +19,8 @@ export interface ConversionOptions {
 
 export interface OrgBlockViewModel {
   id: string;
-  node: SlateNode;
-  descendants: Descendant[];
+  node: LexicalNode;
+  projection: LexicalProjectionNode[];
   displayText: string;
   rawText: string;
 }
@@ -23,24 +33,24 @@ export interface InteractionMetric {
 export const INTERACTION_BUDGET_MS = {
   blockMove: 8,
   blockEdit: 8,
-  slateProjection: 12,
+  lexicalProjection: 12,
   agendaRefresh: 50
 } as const;
 
-export function slateNodesToDescendants(
-  nodes: SlateNode[],
+export function lexicalNodesToProjection(
+  nodes: LexicalNode[],
   fallbackRaw: string,
   options: ConversionOptions
-): Descendant[] {
+): LexicalProjectionNode[] {
   const filtered = options.outlineOnly ? nodes.filter((node) => node.type === 'heading') : nodes;
   if (filtered.length === 0) {
-    return convertOrgToSlate(fallbackRaw, options);
+    return convertOrgToLexical(fallbackRaw, options);
   }
-  return filtered.flatMap((node) => slateNodeToDescendants(node, options));
+  return filtered.flatMap((node) => lexicalNodeToProjection(node, options));
 }
 
 export function createBlockViewModels(
-  nodes: SlateNode[],
+  nodes: LexicalNode[],
   fallbackRaw: string,
   options: ConversionOptions
 ): OrgBlockViewModel[] {
@@ -56,7 +66,7 @@ export function createBlockViewModels(
           line_start: 0,
           line_end: 0
         },
-        descendants: convertOrgToSlate(fallbackRaw, options),
+        projection: convertOrgToLexical(fallbackRaw, options),
         displayText: formatText(fallbackRaw, options.readerMode),
         rawText: fallbackRaw
       }
@@ -66,13 +76,13 @@ export function createBlockViewModels(
   return source.map((node, idx) => ({
     id: `${node.line_start}:${node.line_end}:${node.type}:${idx}`,
     node,
-    descendants: slateNodeToDescendants(node, options),
+    projection: lexicalNodeToProjection(node, options),
     displayText: getDisplayText(node, options),
     rawText: getRawText(node)
   }));
 }
 
-export function updateRawBlock(raw: string, node: SlateNode, nextRawText: string): string {
+export function updateRawBlock(raw: string, node: LexicalNode, nextRawText: string): string {
   const lines = raw.split('\n');
   const safeStart = clamp(node.line_start, 0, Math.max(lines.length - 1, 0));
   const safeEnd = clamp(node.line_end, safeStart, Math.max(lines.length - 1, safeStart));
@@ -81,7 +91,7 @@ export function updateRawBlock(raw: string, node: SlateNode, nextRawText: string
   return lines.join('\n');
 }
 
-export function moveRawBlock(raw: string, node: SlateNode, direction: -1 | 1): string {
+export function moveRawBlock(raw: string, node: LexicalNode, direction: -1 | 1): string {
   const blocks = splitRawIntoMovableBlocks(raw);
   const index = blocks.findIndex((block) => node.line_start >= block.start && node.line_end <= block.end);
   if (index < 0) {
@@ -103,13 +113,13 @@ export function measureInteraction<T>(name: string, fn: () => T): { value: T; me
   return { value, metric: { name, elapsedMs: performanceNow() - start } };
 }
 
-export function convertOrgToSlate(raw: string, options: ConversionOptions): Descendant[] {
+export function convertOrgToLexical(raw: string, options: ConversionOptions): LexicalProjectionNode[] {
   if (!raw) {
     return [paragraphNode('')];
   }
 
   const lines = raw.split('\n');
-  const nodes: Descendant[] = [];
+  const nodes: LexicalProjectionNode[] = [];
   let paragraphBuffer: string[] = [];
   let inDrawer = false;
   let inCode = false;
@@ -128,7 +138,7 @@ export function convertOrgToSlate(raw: string, options: ConversionOptions): Desc
     if (codeBuffer.length === 0) {
       return;
     }
-    nodes.push({ type: 'code_block', children: [{ text: codeBuffer.join('\n') }] } as Descendant);
+    nodes.push({ type: 'code_block', children: [{ text: codeBuffer.join('\n') }] } as LexicalProjectionNode);
     codeBuffer = [];
   };
 
@@ -174,7 +184,7 @@ export function convertOrgToSlate(raw: string, options: ConversionOptions): Desc
         type: 'heading',
         depth,
         children: [{ text }]
-      } as Descendant);
+      } as LexicalProjectionNode);
       continue;
     }
 
@@ -187,7 +197,7 @@ export function convertOrgToSlate(raw: string, options: ConversionOptions): Desc
         ordered: /\d/.test(listMatch[2]),
         checked: listMatch[3] ? /x/i.test(listMatch[3]) : null,
         children: [{ text: formatText(listMatch[4], options.readerMode) }]
-      } as Descendant);
+      } as LexicalProjectionNode);
       continue;
     }
 
@@ -208,12 +218,12 @@ export function convertOrgToSlate(raw: string, options: ConversionOptions): Desc
   return nodes;
 }
 
-function slateNodeToDescendants(node: SlateNode, options: ConversionOptions): Descendant[] {
+function lexicalNodeToProjection(node: LexicalNode, options: ConversionOptions): LexicalProjectionNode[] {
   if (node.type === 'heading') {
     const prefix = [node.todo_keyword, node.priority ? `[#${node.priority}]` : null].filter(Boolean).join(' ');
     const tags = node.tags.length > 0 ? ` :${node.tags.join(':')}:` : '';
     const text = formatText(`${prefix ? `${prefix} ` : ''}${node.text}${tags}`, options.readerMode);
-    return [{ type: 'heading', depth: node.depth, children: [{ text }] } as Descendant];
+    return [{ type: 'heading', depth: node.depth, children: [{ text }] } as LexicalProjectionNode];
   }
   if (node.type === 'list_item') {
     return [
@@ -223,50 +233,50 @@ function slateNodeToDescendants(node: SlateNode, options: ConversionOptions): De
         ordered: node.ordered,
         checked: node.checked ?? null,
         children: [{ text: formatText(node.text, options.readerMode) }]
-      } as Descendant
+      } as LexicalProjectionNode
     ];
   }
   if (node.type === 'planning') {
-    return [{ type: 'planning', children: [{ text: `${node.keyword}: ${node.text}` }] } as Descendant];
+    return [{ type: 'planning', children: [{ text: `${node.keyword}: ${node.text}` }] } as LexicalProjectionNode];
   }
   if (node.type === 'property_drawer') {
     return [
       {
         type: 'property_drawer',
         children: [{ text: Object.entries(node.properties).map(([key, value]) => `${key}: ${value}`).join(' · ') }]
-      } as Descendant
+      } as LexicalProjectionNode
     ];
   }
   if (node.type === 'drawer') {
-    return [{ type: 'drawer', children: [{ text: `${node.name}: ${node.text}` }] } as Descendant];
+    return [{ type: 'drawer', children: [{ text: `${node.name}: ${node.text}` }] } as LexicalProjectionNode];
   }
   if (node.type === 'code_block') {
-    return [{ type: 'code_block', language: node.language ?? null, children: [{ text: node.text }] } as Descendant];
+    return [{ type: 'code_block', language: node.language ?? null, children: [{ text: node.text }] } as LexicalProjectionNode];
   }
   if (node.type === 'table') {
-    return [{ type: 'table', rows: node.rows, children: [{ text: node.rows.map((row) => row.join(' | ')).join('\n') }] } as Descendant];
+    return [{ type: 'table', rows: node.rows, children: [{ text: node.rows.map((row) => row.join(' | ')).join('\n') }] } as LexicalProjectionNode];
   }
   if (node.type === 'directive') {
-    return [{ type: 'directive', children: [{ text: `#+${node.keyword}: ${node.text}` }] } as Descendant];
+    return [{ type: 'directive', children: [{ text: `#+${node.keyword}: ${node.text}` }] } as LexicalProjectionNode];
   }
   if (node.type === 'horizontal_rule') {
-    return [{ type: 'horizontal_rule', children: [{ text: '────' }] } as Descendant];
+    return [{ type: 'horizontal_rule', children: [{ text: '────' }] } as LexicalProjectionNode];
   }
-  return [{ type: 'paragraph', children: [{ text: formatText(node.text, options.readerMode) }] } as Descendant];
+  return [{ type: 'paragraph', children: [{ text: formatText(node.text, options.readerMode) }] } as LexicalProjectionNode];
 }
 
-function paragraphNode(text: string): Descendant {
+function paragraphNode(text: string): LexicalProjectionNode {
   return {
     type: 'paragraph',
     children: [{ text }]
-  } as Descendant;
+  } as LexicalProjectionNode;
 }
 
-function getRawText(node: SlateNode): string {
+function getRawText(node: LexicalNode): string {
   return 'raw' in node ? node.raw : getDisplayText(node, { outlineOnly: false, readerMode: false });
 }
 
-function getDisplayText(node: SlateNode, options: ConversionOptions): string {
+function getDisplayText(node: LexicalNode, options: ConversionOptions): string {
   if (node.type === 'heading') {
     const tags = node.tags.length > 0 ? ` :${node.tags.join(':')}:` : '';
     const todo = node.todo_keyword ? `${node.todo_keyword} ` : '';

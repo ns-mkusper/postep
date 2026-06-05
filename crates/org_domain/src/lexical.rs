@@ -6,7 +6,7 @@ use crate::document::OrgDocument;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "type")]
-pub enum SlateNode {
+pub enum LexicalNode {
     #[serde(rename = "heading")]
     Heading {
         depth: u32,
@@ -97,7 +97,7 @@ struct SourceLine {
     text: String,
 }
 
-pub fn document_to_slate(doc: &OrgDocument) -> Vec<SlateNode> {
+pub fn document_to_lexical(doc: &OrgDocument) -> Vec<LexicalNode> {
     let source: Vec<SourceLine> = doc
         .raw()
         .lines()
@@ -108,7 +108,7 @@ pub fn document_to_slate(doc: &OrgDocument) -> Vec<SlateNode> {
         })
         .collect();
 
-    let mut nodes: Vec<SlateNode> = Vec::new();
+    let mut nodes: Vec<LexicalNode> = Vec::new();
     let mut idx = 0;
 
     while idx < source.len() {
@@ -160,7 +160,7 @@ pub fn document_to_slate(doc: &OrgDocument) -> Vec<SlateNode> {
         }
 
         if is_horizontal_rule(trimmed) {
-            nodes.push(SlateNode::HorizontalRule {
+            nodes.push(LexicalNode::HorizontalRule {
                 raw: line.text.clone(),
                 line_start: line.number,
                 line_end: line.number,
@@ -188,7 +188,7 @@ pub fn document_to_slate(doc: &OrgDocument) -> Vec<SlateNode> {
     }
 
     if nodes.is_empty() {
-        nodes.push(SlateNode::Paragraph {
+        nodes.push(LexicalNode::Paragraph {
             text: String::new(),
             raw: String::new(),
             line_start: 0,
@@ -199,7 +199,7 @@ pub fn document_to_slate(doc: &OrgDocument) -> Vec<SlateNode> {
     nodes
 }
 
-fn parse_heading(line: &SourceLine) -> Option<SlateNode> {
+fn parse_heading(line: &SourceLine) -> Option<LexicalNode> {
     let trimmed = line.text.trim_start();
     let stars_len = trimmed.chars().take_while(|c| *c == '*').count();
     if stars_len == 0
@@ -233,7 +233,7 @@ fn parse_heading(line: &SourceLine) -> Option<SlateNode> {
 
     let text = parts.collect::<Vec<_>>().join(" ");
 
-    Some(SlateNode::Heading {
+    Some(LexicalNode::Heading {
         depth: stars_len as u32,
         text,
         raw: line.text.clone(),
@@ -245,11 +245,11 @@ fn parse_heading(line: &SourceLine) -> Option<SlateNode> {
     })
 }
 
-fn parse_planning(line: &SourceLine) -> Option<SlateNode> {
+fn parse_planning(line: &SourceLine) -> Option<LexicalNode> {
     let trimmed = line.text.trim();
     for keyword in ["SCHEDULED:", "DEADLINE:", "CLOSED:"] {
         if let Some(rest) = trimmed.strip_prefix(keyword) {
-            return Some(SlateNode::Planning {
+            return Some(LexicalNode::Planning {
                 keyword: keyword.trim_end_matches(':').to_string(),
                 text: rest.trim().to_string(),
                 raw: line.text.clone(),
@@ -261,7 +261,7 @@ fn parse_planning(line: &SourceLine) -> Option<SlateNode> {
     None
 }
 
-fn collect_property_drawer(source: &[SourceLine], start: usize) -> (SlateNode, usize) {
+fn collect_property_drawer(source: &[SourceLine], start: usize) -> (LexicalNode, usize) {
     let (raw_lines, end_idx) = collect_until_drawer_end(source, start);
     let mut properties = BTreeMap::new();
     for line in raw_lines.iter().skip(1) {
@@ -278,7 +278,7 @@ fn collect_property_drawer(source: &[SourceLine], start: usize) -> (SlateNode, u
     let line_start = source[start].number;
     let line_end = source[end_idx - 1].number;
     (
-        SlateNode::PropertyDrawer {
+        LexicalNode::PropertyDrawer {
             properties,
             raw: raw_lines.join("\n"),
             line_start,
@@ -289,7 +289,7 @@ fn collect_property_drawer(source: &[SourceLine], start: usize) -> (SlateNode, u
     )
 }
 
-fn collect_drawer(source: &[SourceLine], start: usize, name: String) -> (SlateNode, usize) {
+fn collect_drawer(source: &[SourceLine], start: usize, name: String) -> (LexicalNode, usize) {
     let (raw_lines, end_idx) = collect_until_drawer_end(source, start);
     let text = raw_lines
         .iter()
@@ -301,7 +301,7 @@ fn collect_drawer(source: &[SourceLine], start: usize, name: String) -> (SlateNo
     let line_start = source[start].number;
     let line_end = source[end_idx - 1].number;
     (
-        SlateNode::Drawer {
+        LexicalNode::Drawer {
             name,
             text,
             raw: raw_lines.join("\n"),
@@ -328,7 +328,7 @@ fn collect_until_drawer_end(source: &[SourceLine], start: usize) -> (Vec<String>
     (raw, idx)
 }
 
-fn collect_code_block(source: &[SourceLine], start: usize) -> (SlateNode, usize) {
+fn collect_code_block(source: &[SourceLine], start: usize) -> (LexicalNode, usize) {
     let first = source[start].text.trim();
     let language = first
         .split_whitespace()
@@ -355,7 +355,7 @@ fn collect_code_block(source: &[SourceLine], start: usize) -> (SlateNode, usize)
     let line_start = source[start].number;
     let line_end = source[idx - 1].number;
     (
-        SlateNode::CodeBlock {
+        LexicalNode::CodeBlock {
             language,
             text: body.join("\n"),
             raw: raw.join("\n"),
@@ -366,7 +366,7 @@ fn collect_code_block(source: &[SourceLine], start: usize) -> (SlateNode, usize)
     )
 }
 
-fn collect_table(source: &[SourceLine], start: usize) -> (SlateNode, usize) {
+fn collect_table(source: &[SourceLine], start: usize) -> (LexicalNode, usize) {
     let mut idx = start;
     let mut raw = Vec::new();
     let mut rows = Vec::new();
@@ -385,7 +385,7 @@ fn collect_table(source: &[SourceLine], start: usize) -> (SlateNode, usize) {
     let line_start = source[start].number;
     let line_end = source[idx - 1].number;
     (
-        SlateNode::Table {
+        LexicalNode::Table {
             rows,
             raw: raw.join("\n"),
             line_start,
@@ -395,7 +395,7 @@ fn collect_table(source: &[SourceLine], start: usize) -> (SlateNode, usize) {
     )
 }
 
-fn collect_paragraph(source: &[SourceLine], start: usize) -> (SlateNode, usize) {
+fn collect_paragraph(source: &[SourceLine], start: usize) -> (LexicalNode, usize) {
     let mut idx = start;
     let mut lines = Vec::new();
     while idx < source.len() {
@@ -420,7 +420,7 @@ fn collect_paragraph(source: &[SourceLine], start: usize) -> (SlateNode, usize) 
     let line_start = source[start].number;
     let line_end = source[idx - 1].number;
     (
-        SlateNode::Paragraph {
+        LexicalNode::Paragraph {
             text: lines
                 .iter()
                 .map(|line| line.trim())
@@ -434,7 +434,7 @@ fn collect_paragraph(source: &[SourceLine], start: usize) -> (SlateNode, usize) 
     )
 }
 
-fn parse_list_item(line: &SourceLine) -> Option<SlateNode> {
+fn parse_list_item(line: &SourceLine) -> Option<LexicalNode> {
     let indent = line.text.chars().take_while(|c| c.is_whitespace()).count();
     let trimmed = line.text[indent..].trim_start();
 
@@ -456,7 +456,7 @@ fn parse_list_item(line: &SourceLine) -> Option<SlateNode> {
 
     let (checked, text) = parse_checkbox(rest.trim());
 
-    Some(SlateNode::ListItem {
+    Some(LexicalNode::ListItem {
         depth: (indent / 2 + 1) as u32,
         ordered,
         checked,
@@ -480,14 +480,14 @@ fn parse_checkbox(text: &str) -> (Option<bool>, &str) {
     (None, text)
 }
 
-fn parse_directive(line: &SourceLine) -> SlateNode {
+fn parse_directive(line: &SourceLine) -> LexicalNode {
     let trimmed = line.text.trim();
     let after = trimmed.trim_start_matches("#+");
     let (keyword, text) = after
         .split_once(':')
         .map(|(keyword, text)| (keyword.trim().to_string(), text.trim().to_string()))
         .unwrap_or_else(|| (after.to_string(), String::new()));
-    SlateNode::Directive {
+    LexicalNode::Directive {
         keyword,
         text,
         raw: line.text.clone(),
@@ -570,12 +570,12 @@ assert!(true);
 #+END_SRC
 "#;
         let doc = OrgDocument::from_string("demo.org", raw.to_string());
-        let nodes = document_to_slate(&doc);
+        let nodes = document_to_lexical(&doc);
 
-        assert!(matches!(nodes[0], SlateNode::Directive { .. }));
+        assert!(matches!(nodes[0], LexicalNode::Directive { .. }));
         assert!(matches!(
             &nodes[1],
-            SlateNode::Heading {
+            LexicalNode::Heading {
                 todo_keyword: Some(keyword),
                 priority: Some(priority),
                 tags,
@@ -583,19 +583,19 @@ assert!(true);
             } if keyword == "TODO" && priority == "A" && tags == &vec!["work".to_string(), "mobile".to_string()]
         ));
         assert!(nodes.iter().any(
-            |node| matches!(node, SlateNode::Planning { keyword, .. } if keyword == "SCHEDULED")
+            |node| matches!(node, LexicalNode::Planning { keyword, .. } if keyword == "SCHEDULED")
         ));
-        assert!(nodes.iter().any(|node| matches!(node, SlateNode::PropertyDrawer { properties, .. } if properties.get("STYLE").is_some_and(|v| v == "habit"))));
+        assert!(nodes.iter().any(|node| matches!(node, LexicalNode::PropertyDrawer { properties, .. } if properties.get("STYLE").is_some_and(|v| v == "habit"))));
         assert!(nodes.iter().any(|node| matches!(
             node,
-            SlateNode::ListItem {
+            LexicalNode::ListItem {
                 checked: Some(false),
                 ..
             }
         )));
         assert!(nodes
             .iter()
-            .any(|node| matches!(node, SlateNode::Table { rows, .. } if rows.len() == 2)));
-        assert!(nodes.iter().any(|node| matches!(node, SlateNode::CodeBlock { language: Some(lang), text, .. } if lang == "rust" && text.contains("assert"))));
+            .any(|node| matches!(node, LexicalNode::Table { rows, .. } if rows.len() == 2)));
+        assert!(nodes.iter().any(|node| matches!(node, LexicalNode::CodeBlock { language: Some(lang), text, .. } if lang == "rust" && text.contains("assert"))));
     }
 }

@@ -16,8 +16,8 @@ import { DrawerActions } from '@react-navigation/native';
 import { router, useNavigation } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { listDocuments, loadDocument, updateDocument, type DocumentRef, type SlateNode } from '@postep/bridge';
-import { SlateDocument } from '../../components/SlateDocument';
+import { listDocuments, loadDocument, updateDocument, type DocumentRef, type LexicalNode } from '@postep/bridge';
+import { LexicalDocument } from '../../components/LexicalDocument';
 import { useBridgeEvent } from '../../hooks/useBridgeEvent';
 import { useBridgeConfig } from '../../store/orgConfig';
 import {
@@ -26,7 +26,7 @@ import {
   moveRawBlock,
   updateRawBlock,
   type OrgBlockViewModel
-} from '../../lib/orgSlateModel';
+} from '../../lib/orgLexicalModel';
 
 type NoteLine = {
   text: string;
@@ -80,7 +80,7 @@ function isInternalParagraph(text: string) {
   return /^:(LOGBOOK|END):$/i.test(text.trim()) || /^State ".*" from ".*" \[/.test(text.trim());
 }
 
-function textForNode(node: SlateNode) {
+function textForNode(node: LexicalNode) {
   if ('text' in node) {
     return cleanOrgText(node.text);
   }
@@ -91,7 +91,7 @@ function textForNode(node: SlateNode) {
 }
 
 
-function listItemPreviewText(raw: string, node: Extract<SlateNode, { type: 'list_item' }>) {
+function listItemPreviewText(raw: string, node: Extract<LexicalNode, { type: 'list_item' }>) {
   const lines = raw.split('\n');
   const first = lines[node.line_start] ?? '';
   const indent = first.match(/^\s*/)?.[0].length ?? 0;
@@ -114,7 +114,7 @@ function listItemPreviewText(raw: string, node: Extract<SlateNode, { type: 'list
   return cleanOrgText(body.join('\n'));
 }
 
-function titleFromDocument(doc: DocumentRef, nodes: SlateNode[]) {
+function titleFromDocument(doc: DocumentRef, nodes: LexicalNode[]) {
   const titleDirective = nodes.find((node) => node.type === 'directive' && node.keyword.toUpperCase() === 'TITLE');
   if (titleDirective && 'text' in titleDirective && titleDirective.text.trim()) {
     return titleDirective.text.trim();
@@ -128,10 +128,10 @@ function titleFromDocument(doc: DocumentRef, nodes: SlateNode[]) {
 
 function buildPreview(doc: DocumentRef, config: { roots: string[]; roamRoots?: string[] }): NotePreview {
   const payload = loadDocument(config, doc.path);
-  const title = titleFromDocument(doc, payload.slate);
-  const firstHeading = payload.slate.find((node): node is Extract<SlateNode, { type: 'heading' }> => node.type === 'heading');
-  const planning = payload.slate.filter((node): node is Extract<SlateNode, { type: 'planning' }> => node.type === 'planning');
-  const propertyDrawer = payload.slate.find((node): node is Extract<SlateNode, { type: 'property_drawer' }> => node.type === 'property_drawer');
+  const title = titleFromDocument(doc, payload.lexical);
+  const firstHeading = payload.lexical.find((node): node is Extract<LexicalNode, { type: 'heading' }> => node.type === 'heading');
+  const planning = payload.lexical.filter((node): node is Extract<LexicalNode, { type: 'planning' }> => node.type === 'planning');
+  const propertyDrawer = payload.lexical.find((node): node is Extract<LexicalNode, { type: 'property_drawer' }> => node.type === 'property_drawer');
   const metadata: NoteMetadata = {
     todo: firstHeading?.todo_keyword ?? null,
     priority: firstHeading?.priority ?? null,
@@ -144,7 +144,7 @@ function buildPreview(doc: DocumentRef, config: { roots: string[]; roamRoots?: s
           .map(([key, value]) => ({ key, value }))
       : []
   };
-  const lines: NoteLine[] = payload.slate
+  const lines: NoteLine[] = payload.lexical
     .flatMap((node): NoteLine[] => {
       if (node.type === 'heading') {
         const text = textForNode(node);
@@ -165,11 +165,11 @@ function buildPreview(doc: DocumentRef, config: { roots: string[]; roamRoots?: s
       return [];
     })
     .slice(0, 7);
-  const checkedCount = payload.slate.filter((node) => node.type === 'list_item' && node.checked).length;
+  const checkedCount = payload.lexical.filter((node) => node.type === 'list_item' && node.checked).length;
   const tags = Array.from(
     new Set(
-      payload.slate
-        .filter((node): node is Extract<SlateNode, { type: 'heading' }> => node.type === 'heading')
+      payload.lexical
+        .filter((node): node is Extract<LexicalNode, { type: 'heading' }> => node.type === 'heading')
         .flatMap((node) => node.tags)
     )
   ).slice(0, 3);
@@ -179,9 +179,9 @@ function buildPreview(doc: DocumentRef, config: { roots: string[]; roamRoots?: s
 
 
 
-function buildChecklistItems(raw: string, nodes: SlateNode[]): ChecklistItem[] {
+function buildChecklistItems(raw: string, nodes: LexicalNode[]): ChecklistItem[] {
   return nodes
-    .filter((node): node is Extract<SlateNode, { type: 'list_item' }> => node.type === 'list_item' && node.checked !== null)
+    .filter((node): node is Extract<LexicalNode, { type: 'list_item' }> => node.type === 'list_item' && node.checked !== null)
     .map((node) => ({
       id: `${node.line_start}:${node.text}`,
       text: listItemPreviewText(raw, node),
@@ -211,7 +211,7 @@ function insertChecklistItem(raw: string, text: string): string {
   return lines.join('\n');
 }
 
-function renderOrgNode(node: SlateNode, fallback: Parameters<typeof SlateDocument>[0]['value']) {
+function renderOrgNode(node: LexicalNode, fallback: Parameters<typeof LexicalDocument>[0]['value']) {
   if (node.type === 'heading') {
     return (
       <View style={styles.renderedHeading}>
@@ -307,11 +307,11 @@ function renderOrgNode(node: SlateNode, fallback: Parameters<typeof SlateDocumen
     }
   }
 
-  return <SlateDocument value={fallback} />;
+  return <LexicalDocument value={fallback} />;
 }
 
 
-function blockLabel(node: SlateNode) {
+function blockLabel(node: LexicalNode) {
   if (node.type === 'heading') {
     return 'Note';
   }
@@ -402,18 +402,18 @@ export default function LibraryScreen() {
   });
 
   const blockModel = useMemo(() =>
-    measureInteraction('slateProjection', () =>
-      createBlockViewModels(documentQuery.data?.slate ?? [], documentQuery.data?.raw ?? '', {
+    measureInteraction('lexicalProjection', () =>
+      createBlockViewModels(documentQuery.data?.lexical ?? [], documentQuery.data?.raw ?? '', {
         outlineOnly,
         readerMode
       })
-    ), [documentQuery.data?.raw, documentQuery.data?.slate, outlineOnly, readerMode]);
+    ), [documentQuery.data?.raw, documentQuery.data?.lexical, outlineOnly, readerMode]);
   const blocks = blockModel.value;
   const visibleBlocks = useMemo(() => blocks.filter(isVisibleDocumentBlock), [blocks]);
   const selectedName = documentsQuery.data?.find((doc) => doc.path === selectedPath)?.name ?? 'Org note';
   const checklistItems = useMemo(() =>
-    documentQuery.data ? buildChecklistItems(documentQuery.data.raw, documentQuery.data.slate) : [],
-    [documentQuery.data?.raw, documentQuery.data?.slate]
+    documentQuery.data ? buildChecklistItems(documentQuery.data.raw, documentQuery.data.lexical) : [],
+    [documentQuery.data?.raw, documentQuery.data?.lexical]
   );
   const uncheckedItems = checklistItems.filter((item) => !item.checked);
   const checkedItems = checklistItems.filter((item) => item.checked);
@@ -542,7 +542,7 @@ export default function LibraryScreen() {
         </View>
       </View>
       <ScrollView testID="document-scroll" style={styles.listEditorScroll} contentContainerStyle={styles.listEditorContent}>
-        <Text style={styles.listEditorTitle}>{titleFromDocument({ path: selectedPath ?? '', name: selectedName }, documentQuery.data?.slate ?? [])}</Text>
+        <Text style={styles.listEditorTitle}>{titleFromDocument({ path: selectedPath ?? '', name: selectedName }, documentQuery.data?.lexical ?? [])}</Text>
         {uncheckedItems.map(renderChecklistRow)}
         <View style={styles.addListRow}>
           <Text style={styles.addListIcon}>＋</Text>
@@ -764,7 +764,7 @@ export default function LibraryScreen() {
                             </View>
                           </View>
                         ) : (
-                          renderOrgNode(block.node, block.descendants)
+                          renderOrgNode(block.node, block.projection)
                         )}
                       </View>
                     );
