@@ -4,6 +4,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: read
+
 jobs:
   android-native-build:
     runs-on: ubuntu-latest
@@ -111,3 +117,132 @@ jobs:
           name: launched-ui-playwright-traces
           path: apps/mobile/test-results
           if-no-files-found: ignore
+
+  android-emulator-screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      EXPO_PUBLIC_POSTEP_E2E: "1"
+      CI: "1"
+      JAVA_OPTS: "-Dsun.net.client.defaultConnectTimeout=60000 -Dsun.net.client.defaultReadTimeout=60000"
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g -Dsun.net.client.defaultConnectTimeout=60000 -Dsun.net.client.defaultReadTimeout=60000"
+      SCREENSHOT_DIR: e2e-artifacts/android-screenshots
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Install mobile dependencies
+        working-directory: apps/mobile
+        run: npm install --legacy-peer-deps
+
+      - name: Generate Android native project
+        working-directory: apps/mobile
+        run: npm run e2e:android:prebuild
+
+      - name: Cache Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build Android debug APK
+        working-directory: apps/mobile
+        run: npm run e2e:android:build
+
+      - name: Capture emulator screenshots
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            cd apps/mobile
+            bash e2e/capture-android-screenshots.sh
+
+      - name: Upload Android emulator screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-emulator-screenshots
+          path: apps/mobile/e2e-artifacts/android-screenshots
+          if-no-files-found: error
+
+      - name: Publish screenshots branch
+        id: publish
+        run: |
+          set -euo pipefail
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          SOURCE_SHA="${{ github.event.pull_request.head.sha }}"
+          SCREENSHOT_BRANCH="pr-${PR_NUMBER}-android-screenshots"
+          DEST_DIR="android-emulator-screenshots/${SOURCE_SHA}"
+          TMP_DIR="$(mktemp -d)"
+          cp -R apps/mobile/e2e-artifacts/android-screenshots "${TMP_DIR}/screenshots"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan "${SCREENSHOT_BRANCH}"
+          git rm -rf . >/dev/null 2>&1 || true
+          mkdir -p "${DEST_DIR}"
+          cp "${TMP_DIR}/screenshots"/*.png "${DEST_DIR}/"
+          git add "${DEST_DIR}"
+          git commit -m "Add Android emulator screenshots for PR #${PR_NUMBER}"
+          git push --force origin "HEAD:${SCREENSHOT_BRANCH}"
+
+          echo "branch=${SCREENSHOT_BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "dir=${DEST_DIR}" >> "$GITHUB_OUTPUT"
+
+      - name: Comment screenshots on PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          SCREENSHOT_BRANCH: ${{ steps.publish.outputs.branch }}
+          SCREENSHOT_DIR: ${{ steps.publish.outputs.dir }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          MARKER="<!-- postep-android-emulator-screenshots-pr-${PR_NUMBER} -->"
+          RAW_BASE="https://raw.githubusercontent.com/${REPO}/${SCREENSHOT_BRANCH}/${SCREENSHOT_DIR}"
+          BODY_FILE="$(mktemp)"
+          cat > "$BODY_FILE" <<EOF_COMMENT
+          ${MARKER}
+          Android emulator screenshots for commit \`${SOURCE_SHA}\`:
+
+          | Screen | Screenshot |
+          | --- | --- |
+          | Library | ![Library](${RAW_BASE}/01-library-loaded.png) |
+          | Document editor | ![Document editor](${RAW_BASE}/02-document-opened.png) |
+          | Agenda | ![Agenda](${RAW_BASE}/03-agenda.png) |
+          | Habits | ![Habits](${RAW_BASE}/04-habits.png) |
+          | Roam graph | ![Roam graph](${RAW_BASE}/05-roam-graph.png) |
+          EOF_COMMENT
+
+          COMMENT_ID="$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" --paginate --jq ".[] | select(.body | contains(\"${MARKER}\")) | .id" | tail -n 1)"
+          BODY="$(cat "$BODY_FILE")"
+          if [[ -n "$COMMENT_ID" ]]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${COMMENT_ID}" -f body="$BODY" >/dev/null
+          else
+            gh api -X POST "repos/${REPO}/issues/${PR_NUMBER}/comments" -f body="$BODY" >/dev/null
+          fi
