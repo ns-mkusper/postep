@@ -198,7 +198,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
-            set -euo pipefail
+            set -eu
             SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-before" \
               APK_PATH="${{ github.workspace }}/../postep-base/apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk" \
               METRO_PORT=8081 \
