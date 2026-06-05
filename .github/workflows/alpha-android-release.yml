@@ -113,16 +113,16 @@ jobs:
       - name: Cache Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build Android APK
+      - name: Build Android release APK
         working-directory: apps/mobile/android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleRelease
 
       - name: Stage release asset
         id: asset
         run: |
           set -euo pipefail
           TAG_NAME="${{ steps.version.outputs.tag_name }}"
-          SOURCE_APK="apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk"
+          SOURCE_APK="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
           ASSET_NAME="postep-${TAG_NAME}-alpha.apk"
           test -s "$SOURCE_APK"
           cp "$SOURCE_APK" "$ASSET_NAME"
