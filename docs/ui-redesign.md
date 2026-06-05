@@ -1,21 +1,21 @@
-# Postep UI Redesign (Orgro-inspired)
+# Postep UI Redesign
 
-This document captures the interaction model for Postep’s Lexical-backed front-end. The goal is to deliver the power and navigation comfort of Orgro while layering on Postep’s self-improvement features (agenda, habits, calendar, org-roam) and cloud sync requirements.
+This document captures the interaction model for Postep’s Lexical-backed front-end. The goal is to deliver a fast, comfortable mobile Org workflow while layering on Postep’s self-improvement features (agenda, habits, calendar, org-roam) and cloud sync requirements.
 
 ## Design Principles
-- **Org-first browsing**: Treat Org notes as the primary surface, not a nested menu item. Instant outline control, visibility cycling, and reader modes mirror Orgro’s strengths.
+- **Org-first browsing**: Treat Org notes as the primary surface, not a nested menu item. Instant outline control, visibility cycling, and reader modes keep navigation fast.
 - **Contextual productivity**: Agenda, habits, and calendars live beside the library, but stay linked to the open document so planning flows stay grounded in real notes.
-- **Touch-centric efficiency**: One-handed navigation, large tap targets, and gesture support for folding/unfolding to keep parity with Orgro’s mobile UX quality.
+- **Touch-centric efficiency**: One-handed navigation, large tap targets, and gesture support for folding/unfolding.
 - **Transparent sync**: Surface Drive/SAF sync state inline (status bar + per-root badges) so users trust the Google Drive backend.
 - **Native rendering first**: Use Lexical for document/editor semantics while rendering Org projections with React Native primitives for Android reliability and performance.
 
 ## Global Layout
 - **Bottom navigation bar** with five primary destinations: `Library`, `Agenda`, `Habits`, `Roam`, `Capture`. Each section owns a Lexical-backed projection tuned to the task.
-- **Global search FAB** (floating action button) that opens a full-screen Spotlight overlay combining title/body search, filters (tags, TODO state), and quick-jump, similar to Orgro’s search palette.
+- **Global search FAB** (floating action button) that opens a full-screen Spotlight overlay combining title/body search, filters (tags, TODO state), and quick-jump.
 - **Sync/status pill** anchored top-right showing the active Org root, Google Drive status, and outstanding sync jobs from `org_sync`.
 
 ## Library (Org Browser)
-Mirrors Orgro’s tree-first browsing experience while keeping editing out of the way.
+Keeps browsing tree-first while keeping editing out of the way.
 
 - **Root manager**: quick chips and Android SAF pickers register Org and Org-roam directories with the bridge/`OrgSyncService`.
 - **Action-first surface**: users land on completion/scheduling actions; marking TODOs done or rescheduling happens via the Agenda tab, while habits have dedicated quick taps on the Habits tab.
@@ -23,7 +23,7 @@ Mirrors Orgro’s tree-first browsing experience while keeping editing out of th
 - **Backlinks drawer**: right swipe exposes org-roam backlinks with previews.
 
 ## Agenda
-Inspired by Orgro’s focus on viewing but tailored to Postep’s planning.
+Focused on fast reading and tailored to Postep’s planning.
 
 - **Timeline view** with grouped days and sections for overdue, today, upcoming. Google Calendar events overlay as translucent cards.
 - **Inline details**: tapping an agenda item opens a sheet with the relevant Org subtree rendered through the Lexical projection, allowing quick edits without switching tabs.
@@ -32,7 +32,7 @@ Inspired by Orgro’s focus on viewing but tailored to Postep’s planning.
 - **Streak header**: top of the screen shows habit completion streaks relevant to the selected day.
 
 ## Habits
-Combines Orgro’s reader feel with interactive streak tracking.
+Combines a reader-focused layout with interactive streak tracking.
 
 - **Calendar grid** showing habit completion dots pulled from logbook entries.
 - **Timeline** of upcoming repeats with recommended next action.
@@ -47,7 +47,7 @@ Brings org-roam graph insights into mobile-friendly views.
 - **Query builder**: filter nodes by tag, TODO state, or date created using pills.
 
 ## Capture
-Quick entry modeled after Orgro’s fast capture sheets but extended for Postep workflows.
+Quick entry tailored for Postep workflows.
 
 - **Templates**: choose between daily review, habit reflection, quick task, meeting note.
 - **Input**: Lexical-backed minimal editor/projection seeded with template content, with metadata pickers (deadline, tags) that write drawers into the Org file.

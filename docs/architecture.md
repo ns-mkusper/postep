@@ -4,7 +4,7 @@
 Postep becomes a self-improvement companion that treats a directory of Emacs Org files as the system of record while delivering a touch-first, Lexical-backed experience on Android and beyond. The app should feel native on phones, understand advanced Org constructs (agenda, habits, org-roam), and stay in lock-step with Google Drive and Google Calendar.
 
 ## Design References and Lessons Learned
-- **Orgro mobile workflow**: Track a root folder of Org files, offer quick capture, background sync, and on-device parsing with a fast Org engine.
+- **Mobile Org workflow**: Track a root folder of Org files, offer quick capture, background sync, and on-device parsing with a fast Org engine.
 - **Native React Native rendering**: Lexical owns editor state and document semantics, while Postep projects Org blocks into React Native `View`/`Text` components instead of depending on DOM-centric editor rendering.
 - **Android storage best practices**: Rely on Storage Access Framework (SAF) and Google Drive’s REST API for long-lived access to cloud-backed folders, instead of ad-hoc file paths.
 - **Org-roam knowledge graph**: Org-roam stores backlinks and node metadata in Org files, so we can parse the roam directory to build a graph layer that powers self-improvement journaling.
@@ -44,10 +44,10 @@ These insights feed the architecture below.
 ## Layer Breakdown
 
 ### 1. Rust Core (`crates/`)
-Create a multi-crate workspace that keeps performance-critical Org logic in Rust, mirroring Orgro’s separation between storage adapters and UI.
+Create a multi-crate workspace that keeps performance-critical Org logic in Rust while maintaining a clean separation between storage adapters and UI.
 
 - **`org_domain`**: extends agenda, habit, and document parsing with coverage for drawers, properties, and logbooks so we honour Emacs semantics. It emits `LexicalNode` payloads for the TypeScript bridge.
-- **`org_sync`**: encapsulates filesystem and Google Drive directory syncing with conflict resolution (clock skew, duplicates) and file watchers inspired by Orgro’s continuous sync loop.
+- **`org_sync`**: encapsulates filesystem and Google Drive directory syncing with conflict resolution (clock skew, duplicates) and file watchers for continuous sync.
 - **`org_roam`**: parses roam-specific files (`.org-roam`, `roam.db` migrations) to surface backlinks, tags, and graph structure. It exposes APIs for nearest neighbour queries, backlink list, and graph traversal similar to the desktop plugin.
 - **`org_calendar`**: maps Org agenda data to Google Calendar events, handling time zones and recurrence. It produces ICS snapshots and uses incremental sync tokens when pushing to Google Calendar.
 - **`org_search`**: builds inverted indexes for title/body/tags to power quick capture and goal review.
@@ -60,13 +60,13 @@ A Node-compatible bridge compiled with `napi-rs` exposes idiomatic TypeScript AP
 Responsibilities:
 - Load Org directories on startup, hydrating caches into SQLite (via `expo-sqlite`) for offline support.
 - Manage background tasks: periodic Drive `files.list` delta sync using saved page tokens; SAF document change subscriptions; agenda refresh triggers.
-- Provide file pickers: request directories for Org root and Org-roam root; persist `persistedUriPermissions` so Android retains access, mirroring Orgro’s directory onboarding flow.
+- Provide file pickers: request directories for Org root and Org-roam root; persist `persistedUriPermissions` so Android retains access across app restarts.
 - Serve GraphQL-lite IPC (optional) for desktop/web builds.
 
 ### 3. UI Layer (`apps/mobile`)
 Uses Expo + React Native. Lexical is instantiated for editor state and namespace ownership, while visible Org content is rendered through native React Native components. This avoids DOM-only Lexical React assumptions and keeps Android rendering native.
 
-The Lexical projection surface mirrors Orgro’s navigation style (tree-first library, reader mode, visibility cycling) while layering Postep’s planning features. Detailed flows live in [`docs/ui-redesign.md`](./ui-redesign.md). Highlights:
+The Lexical projection surface emphasizes tree-first navigation, reader mode, and visibility cycling while layering Postep’s planning features. Detailed flows live in [`docs/ui-redesign.md`](./ui-redesign.md). Highlights:
 - **Library**: bottom-tab home with collapsible outline, inline TODO chips, reader mode toggle, backlinks drawer, and Drive sync status badges.
 - **Agenda**: day-grouped timeline with Google Calendar overlays and inline editing sheets fed by `org_domain::agenda_snapshot`.
 - **Habits**: streak dashboards backed by Org logbooks with swipe-to-complete gestures integrated with `org_sync`.

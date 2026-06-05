@@ -10,7 +10,7 @@ Postep is a self-improvement companion that treats your Emacs Org directories as
 - **Org-roam graph**: Explore backlinks, tags, and daily notes from your roam vault to support long-term self-improvement ecosystems.
 
 ## Architecture Snapshot
-The detailed architecture blueprint lives in [`docs/architecture.md`](docs/architecture.md) with the Orgro-inspired Lexical UX in [`docs/ui-redesign.md`](docs/ui-redesign.md). At a glance, the stack looks like this:
+The detailed architecture blueprint lives in [`docs/architecture.md`](docs/architecture.md), with the Lexical UX detailed in [`docs/ui-redesign.md`](docs/ui-redesign.md). At a glance, the stack looks like this:
 
 1. **Rust core crates** (`crates/`): Parse Org files, generate agendas, compute habit metrics, sync storage providers, and build org-roam graphs. The crates compile both to native binaries (for tooling) and shared-library targets that feed the UI.
 2. **TypeScript bridge** (`packages/bridge`, WIP): A `napi-rs` layer that exposes the Rust services to the mobile UI and translates Org documents into Lexical-compatible JSON payloads.
