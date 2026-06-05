@@ -11,6 +11,7 @@ async function screenshot(page: Page, name: string) {
 test('full launched org UI workflow against 10 E2E org files', async ({ page }) => {
   await page.goto('/library');
 
+  await expect(page.getByTestId('library-search-input')).toBeVisible();
   await expect(page.getByTestId('org-library-title')).toHaveText('Local Org');
   await expect(page.getByText('10 notes')).toBeVisible();
   await expect(page.getByTestId('document-card-sample-01.org')).toBeVisible();

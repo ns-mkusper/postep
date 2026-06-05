@@ -482,6 +482,7 @@ export default function LibraryScreen() {
   const [draftRaw, setDraftRaw] = useState("");
   const [newChecklistText, setNewChecklistText] = useState("");
   const [showCheckedItems, setShowCheckedItems] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
   const [interactionStatus, setInteractionStatus] = useState<string | null>(
     null,
   );
@@ -525,6 +526,24 @@ export default function LibraryScreen() {
         ),
     );
   }, [bridgeConfig, documentsQuery.data]);
+
+  const visibleNotes = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) {
+      return noteGrid.value;
+    }
+    return noteGrid.value.filter((note) => {
+      const searchable = [
+        note.title,
+        note.doc.name,
+        ...note.lines.map((line) => line.text),
+        ...note.tags,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return searchable.includes(query);
+    });
+  }, [noteGrid.value, searchQuery]);
 
   const documentQuery = useQuery({
     queryKey: [
@@ -957,13 +976,33 @@ export default function LibraryScreen() {
         >
           <Text style={styles.menuIcon}>☰</Text>
         </TouchableOpacity>
-        <View style={styles.headerTitleBlock}>
-          <Text style={styles.headerTitle} testID="org-library-title">
-            Local Org
-          </Text>
-          <Text style={styles.headerSubtitle}>
-            {documentsQuery.data?.length ?? 0} notes
-          </Text>
+        <View style={styles.searchPill}>
+          <Text style={styles.searchIcon}>⌕</Text>
+          <TextInput
+            testID="library-search-input"
+            style={styles.searchInput}
+            placeholder="Search notes"
+            placeholderTextColor="#B9C0B2"
+            value={searchQuery}
+            onChangeText={(text) => {
+              setSearchQuery(text);
+              if (selectedPath) {
+                setSelectedPath(null);
+              }
+            }}
+            returnKeyType="search"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setSearchQuery("")}
+              hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+              testID="clear-library-search"
+            >
+              <Text style={styles.searchIcon}>×</Text>
+            </TouchableOpacity>
+          )}
         </View>
         <TouchableOpacity
           style={styles.avatarButton}
@@ -977,15 +1016,22 @@ export default function LibraryScreen() {
       {!selectedPath ? (
         <View style={styles.gridScreen}>
           <View style={styles.gridMetaRow}>
-            <Text style={styles.gridMeta}>Notes</Text>
-            {interactionStatus && (
-              <Text style={styles.latencyText}>{interactionStatus}</Text>
-            )}
+            <Text style={styles.gridMeta} testID="org-library-title">
+              Local Org
+            </Text>
+            <View style={styles.gridMetaDetails}>
+              <Text style={styles.noteCountText}>
+                {documentsQuery.data?.length ?? 0} notes
+              </Text>
+              {interactionStatus && (
+                <Text style={styles.latencyText}>{interactionStatus}</Text>
+              )}
+            </View>
           </View>
           <FlatList
             key={`notes-${numColumns}`}
             testID="document-chip-list"
-            data={noteGrid.value}
+            data={visibleNotes}
             numColumns={numColumns}
             keyExtractor={(item) => item.doc.path}
             columnWrapperStyle={
@@ -995,7 +1041,9 @@ export default function LibraryScreen() {
             ListEmptyComponent={() => (
               <View style={styles.emptyDocs}>
                 <Text style={styles.emptyDocsText}>
-                  Add an Org root from the menu to see notes.
+                  {searchQuery.trim()
+                    ? "No notes match that search."
+                    : "Add an Org root from the menu to see notes."}
                 </Text>
               </View>
             )}
@@ -1173,19 +1221,6 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   menuIcon: { color: "#DCE2D3", fontSize: 32, lineHeight: 36 },
-  headerTitleBlock: { flex: 1, justifyContent: "center" },
-  headerTitle: {
-    color: "#F0F4EA",
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: "800",
-  },
-  headerSubtitle: {
-    color: "#8F978A",
-    fontSize: 15,
-    lineHeight: 20,
-    marginTop: 1,
-  },
   searchPill: {
     flex: 1,
     minHeight: 58,
@@ -1196,8 +1231,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 20,
   },
-  searchText: { flex: 1, color: "#B9C0B2", fontSize: 28, fontWeight: "400" },
-  searchIcon: { color: "#B9C0B2", fontSize: 28, fontWeight: "700" },
+  searchInput: {
+    flex: 1,
+    color: "#F2F5EC",
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: "500",
+    paddingVertical: 0,
+    minWidth: 0,
+  },
+  searchIcon: { color: "#B9C0B2", fontSize: 26, fontWeight: "700" },
   avatarButton: {
     width: 48,
     height: 48,
@@ -1218,7 +1261,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  gridMeta: { color: "#9BA394", fontSize: 15, fontWeight: "700" },
+  gridMeta: { color: "#F0F4EA", fontSize: 22, lineHeight: 28, fontWeight: "800" },
+  gridMetaDetails: { alignItems: "flex-end", gap: 2 },
+  noteCountText: { color: "#9BA394", fontSize: 15, fontWeight: "700" },
   latencyText: { color: "#747B6F", fontSize: 11 },
   noteGrid: { paddingHorizontal: 10, paddingBottom: 118, paddingTop: 2 },
   columnWrapper: { gap: 10, alignItems: "flex-start" },
