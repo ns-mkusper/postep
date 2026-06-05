@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import {
+  ActivityIndicator,
   Platform,
   ScrollView,
   StyleSheet,
@@ -21,6 +22,7 @@ export default function SettingsScreen() {
   const [newRoot, setNewRoot] = useState("");
   const [newRoamRoot, setNewRoamRoot] = useState("");
   const [pickerStatus, setPickerStatus] = useState<string | null>(null);
+  const [loadingSource, setLoadingSource] = useState<"org" | "roam" | null>(null);
   const isAndroid = Platform.OS === "android";
 
   const handleAddRoot = () => {
@@ -40,34 +42,48 @@ export default function SettingsScreen() {
   };
 
   const handlePickOrgRoot = async () => {
-    if (!isAndroid) {
+    if (!isAndroid || loadingSource) {
       return;
     }
+    setLoadingSource("org");
+    setPickerStatus("Waiting for Android folder permission…");
     try {
-      const { requestOrgDirectory } =
+      const { requestOrgDirectory, listOrgFilesRecursively } =
         await import("@postep/bridge/platform/android/saf");
       const handle = await requestOrgDirectory();
+      setPickerStatus("Loading source…");
       addRoot(handle.uri);
-      setPickerStatus(`Added ${handle.uri}`);
+      const listing = await listOrgFilesRecursively(handle.uri);
+      const warning = listing.errors.length > 0 ? ` · ${listing.errors.length} folders skipped` : "";
+      setPickerStatus(`Added source · ${listing.entries.length} org files found${warning}`);
     } catch (error) {
       setPickerStatus("Picker cancelled or failed");
       console.warn("SAF picker failed", error);
+    } finally {
+      setLoadingSource(null);
     }
   };
 
   const handlePickRoamRoot = async () => {
-    if (!isAndroid) {
+    if (!isAndroid || loadingSource) {
       return;
     }
+    setLoadingSource("roam");
+    setPickerStatus("Waiting for Android folder permission…");
     try {
-      const { requestOrgDirectory } =
+      const { requestOrgDirectory, listOrgFilesRecursively } =
         await import("@postep/bridge/platform/android/saf");
       const handle = await requestOrgDirectory();
+      setPickerStatus("Loading roam source…");
       addRoamRoot(handle.uri);
-      setPickerStatus(`Added roam ${handle.uri}`);
+      const listing = await listOrgFilesRecursively(handle.uri);
+      const warning = listing.errors.length > 0 ? ` · ${listing.errors.length} folders skipped` : "";
+      setPickerStatus(`Added roam source · ${listing.entries.length} org files found${warning}`);
     } catch (error) {
       setPickerStatus("Picker cancelled or failed");
       console.warn("SAF picker failed", error);
+    } finally {
+      setLoadingSource(null);
     }
   };
 
@@ -111,10 +127,18 @@ export default function SettingsScreen() {
       </View>
       {isAndroid && (
         <TouchableOpacity
-          style={styles.pickerButton}
+          style={[styles.pickerButton, loadingSource && styles.disabledButton]}
           onPress={handlePickOrgRoot}
+          disabled={Boolean(loadingSource)}
         >
-          <Text style={styles.pickerText}>Pick via Android SAF</Text>
+          {loadingSource === "org" ? (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator color="#DDE5D4" />
+              <Text style={styles.pickerText}>Loading source…</Text>
+            </View>
+          ) : (
+            <Text style={styles.pickerText}>Pick via Android SAF</Text>
+          )}
         </TouchableOpacity>
       )}
 
@@ -148,10 +172,18 @@ export default function SettingsScreen() {
       </View>
       {isAndroid && (
         <TouchableOpacity
-          style={styles.pickerButton}
+          style={[styles.pickerButton, loadingSource && styles.disabledButton]}
           onPress={handlePickRoamRoot}
+          disabled={Boolean(loadingSource)}
         >
-          <Text style={styles.pickerText}>Pick Roam Directory</Text>
+          {loadingSource === "roam" ? (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator color="#DDE5D4" />
+              <Text style={styles.pickerText}>Loading source…</Text>
+            </View>
+          ) : (
+            <Text style={styles.pickerText}>Pick Roam Directory</Text>
+          )}
         </TouchableOpacity>
       )}
       {pickerStatus && <Text style={styles.pickerStatus}>{pickerStatus}</Text>}
@@ -246,6 +278,8 @@ const styles = StyleSheet.create({
     borderColor: "#303B2D",
   },
   pickerText: { color: "#DDE5D4", fontWeight: "800", fontSize: 16 },
+  disabledButton: { opacity: 0.62 },
+  loadingRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   pickerStatus: {
     marginTop: 14,
     color: "#9BA394",

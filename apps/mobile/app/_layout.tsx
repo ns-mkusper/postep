@@ -17,7 +17,7 @@ export default function RootLayout() {
         <ThemeProvider value={dark ? DarkTheme : DefaultTheme}>
           <StatusBar style="light" />
           <Drawer
-            initialRouteName="library/index"
+            initialRouteName="index"
             screenOptions={{
               headerTintColor: '#F2F5EC',
               headerStyle: { backgroundColor: '#071008' },
@@ -29,6 +29,7 @@ export default function RootLayout() {
               sceneContainerStyle: { backgroundColor: '#071008' }
             }}
           >
+            <Drawer.Screen name="index" options={{ drawerItemStyle: { display: 'none' }, headerShown: false }} />
             <Drawer.Screen name="library/index" options={{ title: 'Notes', headerShown: false }} />
             <Drawer.Screen name="capture/index" options={{ title: 'Capture' }} />
             <Drawer.Screen name="agenda/index" options={{ title: 'Agenda' }} />
