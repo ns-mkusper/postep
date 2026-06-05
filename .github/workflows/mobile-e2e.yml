@@ -177,9 +177,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: |
-            cd apps/mobile
-            bash e2e/capture-android-screenshots.sh
+          script: bash apps/mobile/e2e/capture-android-screenshots.sh
 
       - name: Upload Android emulator screenshots
         if: always()
