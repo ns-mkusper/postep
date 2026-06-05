@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { performance } from 'node:perf_hooks';
 
-import type { SlateNode } from '@postep/bridge';
+import type { LexicalNode } from '@postep/bridge';
 import {
   INTERACTION_BUDGET_MS,
   createBlockViewModels,
   moveRawBlock,
-  slateNodesToDescendants,
+  lexicalNodesToProjection,
   updateRawBlock
-} from '../lib/orgSlateModel';
+} from '../lib/orgLexicalModel';
 
 declare const globalThis: typeof global & { performance?: Performance };
 globalThis.performance = performance as unknown as Performance;
@@ -41,8 +41,8 @@ echo sample-${idx}
 `;
 });
 
-function syntheticSlate(raw: string): SlateNode[] {
-  return raw.split('\n').flatMap((line, idx): SlateNode[] => {
+function syntheticLexical(raw: string): LexicalNode[] {
+  return raw.split('\n').flatMap((line, idx): LexicalNode[] => {
     const heading = line.match(/^(\*+)\s+(?:(TODO|WAITING|DONE)\s+)?(?:\[#([A-Z])\]\s+)?(.*?)(\s+:[^\s]+:)?$/);
     if (heading) {
       return [
@@ -92,17 +92,17 @@ function timed<T>(fn: () => T): { value: T; elapsedMs: number } {
 }
 
 describe('org UI interaction model with 10 local org samples', () => {
-  it('projects rendered blocks inside the tight slate projection budget', () => {
+  it('projects rendered blocks inside the tight lexical projection budget', () => {
     const { value: allBlocks, elapsedMs } = timed(() =>
-      samples.flatMap((raw) => createBlockViewModels(syntheticSlate(raw), raw, { outlineOnly: false, readerMode: true }))
+      samples.flatMap((raw) => createBlockViewModels(syntheticLexical(raw), raw, { outlineOnly: false, readerMode: true }))
     );
     assert.ok(allBlocks.length >= 50);
-    assert.ok(elapsedMs <= INTERACTION_BUDGET_MS.slateProjection, `projection took ${elapsedMs}ms`);
+    assert.ok(elapsedMs <= INTERACTION_BUDGET_MS.lexicalProjection, `projection took ${elapsedMs}ms`);
   });
 
   it('moves individual org blocks within the UX budget', () => {
     const raw = samples[0];
-    const heading = syntheticSlate(raw).find((node) => node.type === 'heading' && node.text.includes('Agenda item'))!;
+    const heading = syntheticLexical(raw).find((node) => node.type === 'heading' && node.text.includes('Agenda item'))!;
     const { value: moved, elapsedMs } = timed(() => moveRawBlock(raw, heading, -1));
     assert.notEqual(moved, raw);
     assert.ok(moved.indexOf('Agenda item') < moved.indexOf('Habit 1'));
@@ -111,18 +111,18 @@ describe('org UI interaction model with 10 local org samples', () => {
 
   it('edits individual org blocks within the UX budget', () => {
     const raw = samples[1];
-    const listItem = syntheticSlate(raw).find((node) => node.type === 'list_item' && node.text.includes('render pass'))!;
+    const listItem = syntheticLexical(raw).find((node) => node.type === 'list_item' && node.text.includes('render pass'))!;
     const { value: edited, elapsedMs } = timed(() => updateRawBlock(raw, listItem, '- [X] complete app render pass'));
     assert.ok(edited.includes('- [X] complete app render pass'));
     assert.ok(elapsedMs <= INTERACTION_BUDGET_MS.blockEdit, `edit took ${elapsedMs}ms`);
   });
 
-  it('keeps read-mode descendant generation within budget after common toggles', () => {
-    const nodes = samples.flatMap(syntheticSlate);
-    const { value: descendants, elapsedMs } = timed(() =>
-      slateNodesToDescendants(nodes, samples.join('\n'), { outlineOnly: false, readerMode: true })
+  it('keeps read-mode projection generation within budget after common toggles', () => {
+    const nodes = samples.flatMap(syntheticLexical);
+    const { value: projection, elapsedMs } = timed(() =>
+      lexicalNodesToProjection(nodes, samples.join('\n'), { outlineOnly: false, readerMode: true })
     );
-    assert.ok(descendants.length >= 50);
-    assert.ok(elapsedMs <= INTERACTION_BUDGET_MS.slateProjection, `descendants took ${elapsedMs}ms`);
+    assert.ok(projection.length >= 50);
+    assert.ok(elapsedMs <= INTERACTION_BUDGET_MS.lexicalProjection, `projection took ${elapsedMs}ms`);
   });
 });

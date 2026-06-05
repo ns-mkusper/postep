@@ -1,20 +1,26 @@
-import React, { useState } from 'react';
-import { View, TextInput, StyleSheet, Text, TouchableOpacity } from 'react-native';
-import { useQueryClient } from '@tanstack/react-query';
+import React, { useState } from "react";
+import {
+  View,
+  TextInput,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+} from "react-native";
+import { useQueryClient } from "@tanstack/react-query";
 
-import { appendCaptureEntry } from '@postep/bridge';
-import { useBridgeConfig } from '../../store/orgConfig';
+import { appendCaptureEntry } from "@postep/bridge";
+import { useBridgeConfig } from "../../store/orgConfig";
 
 export default function CaptureScreen() {
   const queryClient = useQueryClient();
   const config = useBridgeConfig();
-  const [content, setContent] = useState('* TODO ');
-  const [targetPath, setTargetPath] = useState('inbox.org');
+  const [content, setContent] = useState("* TODO ");
+  const [targetPath, setTargetPath] = useState("inbox.org");
   const [status, setStatus] = useState<string | null>(null);
 
   function handleSubmit() {
     if (config.roots.length === 0) {
-      setStatus('Please add an Org root first.');
+      setStatus("Please add an Org root first.");
       return;
     }
     try {
@@ -22,18 +28,22 @@ export default function CaptureScreen() {
         roots: config.roots,
         roamRoots: config.roamRoots,
         targetPath,
-        content
+        content,
       });
       queryClient.setQueryData(
-        ['agenda', config.roots.join(':'), config.roamRoots?.join(':') ?? ''],
-        snapshot
+        ["agenda", config.roots.join(":"), config.roamRoots?.join(":") ?? ""],
+        snapshot,
       );
-      queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'documents' });
-      queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'document' });
-      setContent('* TODO ');
+      queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === "documents",
+      });
+      queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === "document",
+      });
+      setContent("* TODO ");
       setStatus(`Captured to ${targetPath}`);
     } catch (error) {
-      setStatus('Failed: ' + (error as Error).message);
+      setStatus("Failed: " + (error as Error).message);
     }
   }
 
@@ -65,37 +75,47 @@ export default function CaptureScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0B0C0F',
-    padding: 20
+    backgroundColor: "#071008",
+    padding: 18,
   },
   label: {
-    color: '#AEB4C6',
-    marginBottom: 6,
-    fontSize: 12
+    color: "#A6AEA0",
+    marginBottom: 7,
+    fontSize: 14,
+    fontWeight: "800",
+    textTransform: "uppercase",
   },
   input: {
-    backgroundColor: '#181B23',
-    color: '#F5F6FA',
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 16
+    backgroundColor: "#091108",
+    color: "#F2F5EC",
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    borderRadius: 14,
+    marginBottom: 18,
+    borderWidth: 1.5,
+    borderColor: "#3D4638",
+    fontSize: 20,
+    lineHeight: 28,
   },
   textarea: {
-    minHeight: 140,
-    textAlignVertical: 'top'
+    minHeight: 170,
+    textAlignVertical: "top",
   },
   button: {
-    backgroundColor: '#4C6EF5',
+    backgroundColor: "#4D5F31",
     padding: 16,
-    borderRadius: 12,
-    alignItems: 'center'
+    borderRadius: 16,
+    alignItems: "center",
   },
   buttonText: {
-    color: '#FFFFFF',
-    fontWeight: '600'
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: 18,
   },
   status: {
     marginTop: 16,
-    color: '#7B849E'
-  }
+    color: "#9BA394",
+    fontSize: 17,
+    lineHeight: 24,
+  },
 });

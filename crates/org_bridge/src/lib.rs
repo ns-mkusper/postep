@@ -115,7 +115,7 @@ pub struct SetAgendaStatusParams {
 pub struct OrgDocumentPayload {
     pub path: String,
     pub raw: String,
-    pub slate: serde_json::Value,
+    pub lexical: serde_json::Value,
 }
 
 #[napi(object)]
@@ -220,12 +220,12 @@ pub fn load_document(config: OrgBridgeConfig, path: String) -> napi::Result<OrgD
         .get_document(&path)
         .with_context(|| format!("document not loaded: {}", path))
         .map_err(to_napi_error)?;
-    let slate = service.slate_nodes(&path).map_err(to_napi_error)?;
-    let slate_json = serde_json::to_value(slate).map_err(|err| to_napi_error(err.into()))?;
+    let lexical = service.lexical_nodes(&path).map_err(to_napi_error)?;
+    let lexical_json = serde_json::to_value(lexical).map_err(|err| to_napi_error(err.into()))?;
     Ok(OrgDocumentPayload {
         path,
         raw: doc.raw().to_string(),
-        slate: slate_json,
+        lexical: lexical_json,
     })
 }
 
@@ -248,12 +248,12 @@ pub fn update_document(params: UpdateDocumentParams) -> napi::Result<OrgDocument
         .get_document(&path)
         .with_context(|| format!("document not loaded after update: {}", path))
         .map_err(to_napi_error)?;
-    let slate = service.slate_nodes(&path).map_err(to_napi_error)?;
-    let slate_json = serde_json::to_value(slate).map_err(|err| to_napi_error(err.into()))?;
+    let lexical = service.lexical_nodes(&path).map_err(to_napi_error)?;
+    let lexical_json = serde_json::to_value(lexical).map_err(|err| to_napi_error(err.into()))?;
     Ok(OrgDocumentPayload {
         path,
         raw: doc.raw().to_string(),
-        slate: slate_json,
+        lexical: lexical_json,
     })
 }
 

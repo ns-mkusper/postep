@@ -13,9 +13,8 @@ use walkdir::WalkDir;
 use crate::{
     agenda,
     document::OrgDocument,
-    habit,
+    habit, lexical,
     notifications::{NotificationRequest, NotificationSink},
-    slate,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -298,9 +297,9 @@ impl OrgService {
         Ok(())
     }
 
-    pub fn slate_nodes(&self, path: impl AsRef<Path>) -> Result<Vec<slate::SlateNode>> {
+    pub fn lexical_nodes(&self, path: impl AsRef<Path>) -> Result<Vec<lexical::LexicalNode>> {
         let doc = self.get_document(path)?;
-        Ok(slate::document_to_slate(&doc))
+        Ok(lexical::document_to_lexical(&doc))
     }
 
     pub fn add_agenda_entry(

@@ -95,7 +95,7 @@ export interface DocumentRef {
   name: string;
 }
 
-export type SlateNode =
+export type LexicalNode =
   | BlockMetadata & {
       type: 'heading';
       depth: number;
@@ -135,7 +135,7 @@ export interface BlockMetadata {
 export interface DocumentPayload {
   path: string;
   raw: string;
-  slate: SlateNode[];
+  lexical: LexicalNode[];
 }
 
 export interface UpdateDocumentRequest {
@@ -309,7 +309,7 @@ export function listDocuments(config: OrgBridgeConfig): DocumentRef[] {
 
 export function loadDocument(config: OrgBridgeConfig, path: string): DocumentPayload {
   if (config.roots.length === 0) {
-    return { path, raw: '', slate: [] };
+    return { path, raw: '', lexical: [] };
   }
   return resolveNativeBinding().load_document(config, path);
 }
@@ -552,7 +552,7 @@ const e2eNativeModule: NativeModule = {
 function loadE2EDocument(path: string): DocumentPayload {
   ensureE2EDocs();
   const raw = e2eDocs.get(path) ?? '';
-  return { path, raw, slate: rawToSlate(raw) };
+  return { path, raw, lexical: rawToLexical(raw) };
 }
 
 function buildE2ERoamGraph(): RoamGraph {
@@ -582,13 +582,13 @@ function buildE2EAgendaSnapshot(): AgendaSnapshot {
   const items: AgendaItem[] = [];
   const habits: Habit[] = [];
   for (const [path, raw] of e2eDocs) {
-    const nodes = rawToSlate(raw);
-    for (const heading of nodes.filter((node): node is Extract<SlateNode, { type: 'heading' }> => node.type === 'heading')) {
+    const nodes = rawToLexical(raw);
+    for (const heading of nodes.filter((node): node is Extract<LexicalNode, { type: 'heading' }> => node.type === 'heading')) {
       const nextHeading = nodes.find((node) => node.type === 'heading' && node.line_start > heading.line_start);
       const bodyNodes = nodes.filter((node) => node.line_start > heading.line_start && (!nextHeading || node.line_start < nextHeading.line_start));
-      const scheduled = bodyNodes.find((node): node is Extract<SlateNode, { type: 'planning' }> => node.type === 'planning' && node.keyword === 'SCHEDULED');
-      const deadline = bodyNodes.find((node): node is Extract<SlateNode, { type: 'planning' }> => node.type === 'planning' && node.keyword === 'DEADLINE');
-      const propertyDrawer = bodyNodes.find((node): node is Extract<SlateNode, { type: 'property_drawer' }> => node.type === 'property_drawer');
+      const scheduled = bodyNodes.find((node): node is Extract<LexicalNode, { type: 'planning' }> => node.type === 'planning' && node.keyword === 'SCHEDULED');
+      const deadline = bodyNodes.find((node): node is Extract<LexicalNode, { type: 'planning' }> => node.type === 'planning' && node.keyword === 'DEADLINE');
+      const propertyDrawer = bodyNodes.find((node): node is Extract<LexicalNode, { type: 'property_drawer' }> => node.type === 'property_drawer');
       const styleHabit = propertyDrawer?.properties.STYLE?.toLowerCase() === 'habit';
       const planning = scheduled ?? deadline;
       const kind = scheduled ? 'Scheduled' : deadline ? 'Deadline' : 'Floating';
@@ -643,9 +643,9 @@ function setE2EHeadlineStatus(path: string, headlineLine: number, status: string
   e2eDocs.set(path, lines.join('\n'));
 }
 
-function rawToSlate(raw: string): SlateNode[] {
+function rawToLexical(raw: string): LexicalNode[] {
   const lines = raw.split('\n');
-  const nodes: SlateNode[] = [];
+  const nodes: LexicalNode[] = [];
   let idx = 0;
   while (idx < lines.length) {
     const line = lines[idx];

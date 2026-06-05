@@ -120,19 +120,19 @@ jobs:
 
   android-emulator-screenshots:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     env:
       EXPO_PUBLIC_POSTEP_E2E: "1"
       CI: "1"
       JAVA_OPTS: "-Dsun.net.client.defaultConnectTimeout=60000 -Dsun.net.client.defaultReadTimeout=60000"
       GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g -Dsun.net.client.defaultConnectTimeout=60000 -Dsun.net.client.defaultReadTimeout=60000"
-      SCREENSHOT_DIR: e2e-artifacts/android-screenshots
     steps:
-      - name: Checkout
+      - name: Checkout PR head
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -154,22 +154,42 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm || true
 
-      - name: Install mobile dependencies
-        working-directory: apps/mobile
-        run: npm install --legacy-peer-deps
-
-      - name: Generate Android native project
-        working-directory: apps/mobile
-        run: npm run e2e:android:prebuild
-
       - name: Cache Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build Android debug APK
+      - name: Install head mobile dependencies
+        working-directory: apps/mobile
+        run: npm install --legacy-peer-deps
+
+      - name: Generate head Android native project
+        working-directory: apps/mobile
+        run: npm run e2e:android:prebuild
+
+      - name: Build head Android debug APK
         working-directory: apps/mobile
         run: npm run e2e:android:build
 
-      - name: Capture emulator screenshots
+      - name: Create base worktree
+        run: |
+          set -euo pipefail
+          git worktree add ../postep-base "${{ github.event.pull_request.base.sha }}"
+          mkdir -p apps/mobile/e2e-artifacts/apks
+          cp apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk apps/mobile/e2e-artifacts/apks/head-app-debug.apk
+          cp apps/mobile/e2e/capture-android-screenshots.sh ../postep-base/apps/mobile/e2e/capture-android-screenshots.sh
+
+      - name: Install base mobile dependencies
+        working-directory: ../postep-base/apps/mobile
+        run: npm install --legacy-peer-deps
+
+      - name: Generate base Android native project
+        working-directory: ../postep-base/apps/mobile
+        run: npm run e2e:android:prebuild
+
+      - name: Build base Android debug APK
+        working-directory: ../postep-base/apps/mobile
+        run: npm run e2e:android:build
+
+      - name: Capture before and after emulator screenshots
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -177,18 +197,36 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: bash apps/mobile/e2e/capture-android-screenshots.sh
+          script: |
+            bash -euo pipefail -c 'SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-before" APK_PATH="${{ github.workspace }}/../postep-base/apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk" METRO_PORT=8081 EXPO_LOG=/tmp/postep-base-expo-screenshots.log bash "${{ github.workspace }}/../postep-base/apps/mobile/e2e/capture-android-screenshots.sh"'
+            adb shell am force-stop com.postep.mobile || true
+            bash -euo pipefail -c 'SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-after" APK_PATH="${{ github.workspace }}/apps/mobile/e2e-artifacts/apks/head-app-debug.apk" METRO_PORT=8081 EXPO_LOG=/tmp/postep-head-expo-screenshots.log bash "${{ github.workspace }}/apps/mobile/e2e/capture-android-screenshots.sh"'
 
-      - name: Upload Android emulator screenshots
+      - name: Compare Android emulator screenshots
+        if: always()
+        working-directory: apps/mobile
+        run: |
+          if [[ -d e2e-artifacts/android-screenshots-before && -d e2e-artifacts/android-screenshots-after ]]; then
+            node e2e/compare-screenshots.mjs \
+              e2e-artifacts/android-screenshots-before \
+              e2e-artifacts/android-screenshots-after \
+              e2e-artifacts/android-screenshots-diff
+          fi
+
+      - name: Upload Android emulator screenshot comparison
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-emulator-screenshots
-          path: apps/mobile/e2e-artifacts/android-screenshots
+          name: android-emulator-screenshot-comparison
+          path: |
+            apps/mobile/e2e-artifacts/android-screenshots-before
+            apps/mobile/e2e-artifacts/android-screenshots-after
+            apps/mobile/e2e-artifacts/android-screenshots-diff
           if-no-files-found: error
 
       - name: Publish screenshots branch
         id: publish
+        if: always() && hashFiles('apps/mobile/e2e-artifacts/android-screenshots-after/*.png') != ''
         run: |
           set -euo pipefail
           PR_NUMBER="${{ github.event.pull_request.number }}"
@@ -196,14 +234,19 @@ jobs:
           SCREENSHOT_BRANCH="pr-${PR_NUMBER}-android-screenshots"
           DEST_DIR="android-emulator-screenshots/${SOURCE_SHA}"
           TMP_DIR="$(mktemp -d)"
-          cp -R apps/mobile/e2e-artifacts/android-screenshots "${TMP_DIR}/screenshots"
+          mkdir -p "${TMP_DIR}/screenshots"
+          cp -R apps/mobile/e2e-artifacts/android-screenshots-before "${TMP_DIR}/screenshots/before"
+          cp -R apps/mobile/e2e-artifacts/android-screenshots-after "${TMP_DIR}/screenshots/after"
+          if [[ -d apps/mobile/e2e-artifacts/android-screenshots-diff ]]; then
+            cp -R apps/mobile/e2e-artifacts/android-screenshots-diff "${TMP_DIR}/screenshots/diff"
+          fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan "${SCREENSHOT_BRANCH}"
           git rm -rf . >/dev/null 2>&1 || true
           mkdir -p "${DEST_DIR}"
-          cp "${TMP_DIR}/screenshots"/*.png "${DEST_DIR}/"
+          cp -R "${TMP_DIR}/screenshots"/* "${DEST_DIR}/"
           git add "${DEST_DIR}"
           git commit -m "Add Android emulator screenshots for PR #${PR_NUMBER}"
           git push --force origin "HEAD:${SCREENSHOT_BRANCH}"
@@ -212,6 +255,7 @@ jobs:
           echo "dir=${DEST_DIR}" >> "$GITHUB_OUTPUT"
 
       - name: Comment screenshots on PR
+        if: steps.publish.outputs.branch != ''
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -226,15 +270,15 @@ jobs:
           BODY_FILE="$(mktemp)"
           cat > "$BODY_FILE" <<EOF_COMMENT
           ${MARKER}
-          Android emulator screenshots for commit \`${SOURCE_SHA}\`:
+          Android emulator before/after screenshots for commit \`${SOURCE_SHA}\`:
 
-          | Screen | Screenshot |
-          | --- | --- |
-          | Library | ![Library](${RAW_BASE}/01-library-loaded.png) |
-          | Document editor | ![Document editor](${RAW_BASE}/02-document-opened.png) |
-          | Agenda | ![Agenda](${RAW_BASE}/03-agenda.png) |
-          | Habits | ![Habits](${RAW_BASE}/04-habits.png) |
-          | Roam graph | ![Roam graph](${RAW_BASE}/05-roam-graph.png) |
+          | Screen | Before | After | Diff |
+          | --- | --- | --- | --- |
+          | Library | ![Library before](${RAW_BASE}/before/01-library-loaded.png) | ![Library after](${RAW_BASE}/after/01-library-loaded.png) | ![Library diff](${RAW_BASE}/diff/01-library-loaded.diff.png) |
+          | Document editor | ![Document editor before](${RAW_BASE}/before/02-document-opened.png) | ![Document editor after](${RAW_BASE}/after/02-document-opened.png) | ![Document editor diff](${RAW_BASE}/diff/02-document-opened.diff.png) |
+          | Agenda | ![Agenda before](${RAW_BASE}/before/03-agenda.png) | ![Agenda after](${RAW_BASE}/after/03-agenda.png) | ![Agenda diff](${RAW_BASE}/diff/03-agenda.diff.png) |
+          | Habits | ![Habits before](${RAW_BASE}/before/04-habits.png) | ![Habits after](${RAW_BASE}/after/04-habits.png) | ![Habits diff](${RAW_BASE}/diff/04-habits.diff.png) |
+          | Roam graph | ![Roam graph before](${RAW_BASE}/before/05-roam-graph.png) | ![Roam graph after](${RAW_BASE}/after/05-roam-graph.png) | ![Roam graph diff](${RAW_BASE}/diff/05-roam-graph.diff.png) |
           EOF_COMMENT
 
           COMMENT_ID="$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" --paginate --jq ".[] | select(.body | contains(\"${MARKER}\")) | .id" | tail -n 1)"

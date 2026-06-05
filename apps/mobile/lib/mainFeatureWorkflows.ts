@@ -1,5 +1,5 @@
 import type { AgendaItem, Habit, RoamGraph } from '@postep/bridge';
-import { INTERACTION_BUDGET_MS, type InteractionMetric, measureInteraction } from './orgSlateModel';
+import { INTERACTION_BUDGET_MS, type InteractionMetric, measureInteraction } from './orgLexicalModel';
 
 export interface AgendaDayGroup {
   date: string;

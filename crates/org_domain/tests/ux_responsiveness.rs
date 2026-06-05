@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use org_domain::{document::OrgDocument, service::OrgService, slate::document_to_slate};
+use org_domain::{document::OrgDocument, lexical::document_to_lexical, service::OrgService};
 use tempfile::tempdir;
 
 const BLOCK_RENDER_BUDGET: Duration = Duration::from_millis(18);
@@ -94,7 +94,7 @@ fn launches_local_org_area_and_renders_ten_sample_files_inside_budget() {
         docs.iter()
             .map(|path| {
                 let doc = service.get_document(path).expect("document loaded");
-                document_to_slate(&doc).len()
+                document_to_lexical(&doc).len()
             })
             .sum::<usize>()
     });
@@ -147,7 +147,7 @@ fn edits_one_block_and_refreshes_rendering_inside_budget() {
             .update_document(path, replacement)
             .expect("update document");
         let refreshed = service.get_document(path).expect("refreshed doc");
-        let rendered = document_to_slate(&refreshed);
+        let rendered = document_to_lexical(&refreshed);
         assert!(rendered.iter().any(|node| {
             serde_json::to_string(node)
                 .expect("serialize node")
@@ -164,10 +164,10 @@ fn edits_one_block_and_refreshes_rendering_inside_budget() {
 }
 
 #[test]
-fn slate_projection_handles_single_file_without_allocating_parser_state() {
+fn lexical_projection_handles_single_file_without_allocating_parser_state() {
     let raw = sample_org(42);
     let doc = OrgDocument::from_string("sample.org", raw);
-    let (nodes, elapsed) = elapsed(|| document_to_slate(&doc));
+    let (nodes, elapsed) = elapsed(|| document_to_lexical(&doc));
     assert!(nodes.len() >= 10);
     assert!(
         elapsed <= Duration::from_millis(3),
