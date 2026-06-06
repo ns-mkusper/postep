@@ -1,5 +1,4 @@
-import React, { useMemo } from "react";
-import { createEditor } from "lexical";
+import React from "react";
 import { StyleSheet, Text as RNText, View } from "react-native";
 
 import type { LexicalProjectionNode } from "../lib/orgLexicalModel";
@@ -14,8 +13,6 @@ function nodeText(node: LexicalProjectionNode): string {
 }
 
 export function LexicalDocument({ value }: LexicalDocumentProps) {
-  useMemo(() => createEditor({ namespace: "postep-org-document" }), []);
-
   return (
     <View style={styles.container}>
       {value.map((element, index) => {

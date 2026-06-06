@@ -9,7 +9,11 @@ import {
 } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { addHabit, deleteHabit, loadAgendaSnapshot } from "@postep/bridge";
+import {
+  addHabitAsync,
+  deleteHabitAsync,
+  loadAgendaSnapshotAsync,
+} from "@postep/bridge";
 import { useBridgeConfig } from "../../store/orgConfig";
 import { useBridgeEvent } from "../../hooks/useBridgeEvent";
 
@@ -29,7 +33,7 @@ export default function HabitsScreen() {
     queryFn: () =>
       config.roots.length === 0
         ? Promise.resolve({ items: [], habits: [] })
-        : Promise.resolve(loadAgendaSnapshot(config)),
+        : loadAgendaSnapshotAsync(config),
   });
 
   useBridgeEvent("agendaChanged", () => agendaQuery.refetch());
@@ -40,11 +44,11 @@ export default function HabitsScreen() {
     [agendaQuery.data?.habits],
   );
 
-  const handleAddHabit = () => {
+  const handleAddHabit = async () => {
     if (config.roots.length === 0 || !title.trim()) {
       return;
     }
-    const snapshot = addHabit({
+    const snapshot = await addHabitAsync({
       roots: config.roots,
       roamRoots: config.roamRoots,
       title: title.trim(),
@@ -54,11 +58,11 @@ export default function HabitsScreen() {
     setTitle("New habit");
   };
 
-  const handleDeleteHabit = (habitTitle: string) => {
+  const handleDeleteHabit = async (habitTitle: string) => {
     if (config.roots.length === 0) {
       return;
     }
-    const snapshot = deleteHabit({
+    const snapshot = await deleteHabitAsync({
       roots: config.roots,
       roamRoots: config.roamRoots,
       path: `${config.roots[0]}/sample-01.org`,

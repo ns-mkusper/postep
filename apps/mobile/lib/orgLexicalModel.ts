@@ -113,6 +113,15 @@ export function measureInteraction<T>(name: string, fn: () => T): { value: T; me
   return { value, metric: { name, elapsedMs: performanceNow() - start } };
 }
 
+export async function measureAsyncInteraction<T>(
+  name: string,
+  fn: () => Promise<T>
+): Promise<{ value: T; metric: InteractionMetric }> {
+  const start = performanceNow();
+  const value = await fn();
+  return { value, metric: { name, elapsedMs: performanceNow() - start } };
+}
+
 export function convertOrgToLexical(raw: string, options: ConversionOptions): LexicalProjectionNode[] {
   if (!raw) {
     return [paragraphNode('')];

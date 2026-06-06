@@ -1,8 +1,8 @@
 import {
-  listDocuments,
-  loadDocument,
+  listDocumentsAsync,
+  loadDocumentAsync,
   parseOrgDocument,
-  updateDocument,
+  updateDocumentAsync,
   type DocumentPayload,
   type DocumentRef,
   type OrgBridgeConfig,
@@ -42,13 +42,12 @@ export async function listDocumentsForConfig(
   const documents: DocumentRef[] = [];
 
   if (nativeConfig.roots.length > 0) {
-    documents.push(...listDocuments(nativeConfig));
+    documents.push(...(await listDocumentsAsync(nativeConfig)));
   }
 
   if (safRoots.length > 0) {
-    const { listOrgFilesRecursively, nameFromSafUri } = await import(
-      "@postep/bridge/platform/android/saf"
-    );
+    const { listOrgFilesRecursively, nameFromSafUri } =
+      await import("@postep/bridge/platform/android/saf");
     for (const root of safRoots) {
       const listing = await listOrgFilesRecursively(root);
       documents.push(
@@ -72,18 +71,19 @@ export async function loadDocumentForConfig(
     const raw = await readOrgFile(path);
     return parseOrgDocument(raw, path);
   }
-  return loadDocument(splitConfig(config).nativeConfig, path);
+  return loadDocumentAsync(splitConfig(config).nativeConfig, path);
 }
 
 export async function updateDocumentForConfig(
   request: UpdateDocumentRequest,
 ): Promise<DocumentPayload> {
   if (isSafUri(request.path)) {
-    const { writeOrgFile } = await import("@postep/bridge/platform/android/saf");
+    const { writeOrgFile } =
+      await import("@postep/bridge/platform/android/saf");
     await writeOrgFile(request.path, request.raw);
     return parseOrgDocument(request.raw, request.path);
   }
-  return updateDocument({
+  return updateDocumentAsync({
     ...request,
     roots: request.roots.filter((root) => !isSafUri(root)),
     roamRoots: request.roamRoots?.filter((root) => !isSafUri(root)),

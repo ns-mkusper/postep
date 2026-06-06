@@ -26,6 +26,7 @@ import { useBridgeEvent } from "../../hooks/useBridgeEvent";
 import { useBridgeConfig } from "../../store/orgConfig";
 import {
   createBlockViewModels,
+  measureAsyncInteraction,
   measureInteraction,
   moveRawBlock,
   updateRawBlock,
@@ -516,21 +517,20 @@ export default function LibraryScreen() {
       bridgeConfig.roamRoots?.join(":") ?? "",
     ],
     enabled: Boolean(documentsQuery.data) && bridgeConfig.roots.length > 0,
-    queryFn: async () => {
-      const documents = documentsQuery.data ?? [];
-      const payloads = await Promise.all(
-        documents.map((doc) => loadDocumentForConfig(bridgeConfig, doc.path)),
-      );
-      return measureInteraction("noteGrid", () =>
-        documents
+    queryFn: () =>
+      measureAsyncInteraction("noteGrid", async () => {
+        const documents = documentsQuery.data ?? [];
+        const payloads = await Promise.all(
+          documents.map((doc) => loadDocumentForConfig(bridgeConfig, doc.path)),
+        );
+        return documents
           .map((doc, index) => buildPreview(doc, payloads[index]))
           .sort((left, right) =>
             (left.primaryDate ?? "9999-12-31").localeCompare(
               right.primaryDate ?? "9999-12-31",
             ),
-          ),
-      );
-    },
+          );
+      }),
   });
 
   const noteGrid = previewsQuery.data ?? {
@@ -634,18 +634,21 @@ export default function LibraryScreen() {
     if (!selectedPath || bridgeConfig.roots.length === 0) {
       return;
     }
-    const start = performance.now();
-    const payload = await updateDocumentForConfig({
-      roots: bridgeConfig.roots,
-      roamRoots: bridgeConfig.roamRoots,
-      path: selectedPath,
-      raw,
-    });
-    const metric = { elapsedMs: performance.now() - start };
+    const path = selectedPath;
+    const { value: payload, metric } = await measureAsyncInteraction(
+      label,
+      () =>
+        updateDocumentForConfig({
+          roots: bridgeConfig.roots,
+          roamRoots: bridgeConfig.roamRoots,
+          path,
+          raw,
+        }),
+    );
     queryClient.setQueryData(
       [
         "document",
-        selectedPath,
+        path,
         bridgeConfig.roots.join(":"),
         bridgeConfig.roamRoots?.join(":") ?? "",
       ],
@@ -698,14 +701,16 @@ export default function LibraryScreen() {
     if (nextRaw === payload.raw) {
       return;
     }
-    const start = performance.now();
-    const nextPayload = await updateDocumentForConfig({
-      roots: bridgeConfig.roots,
-      roamRoots: bridgeConfig.roamRoots,
-      path,
-      raw: nextRaw,
-    });
-    const metric = { elapsedMs: performance.now() - start };
+    const { value: nextPayload, metric } = await measureAsyncInteraction(
+      "checklistToggle",
+      () =>
+        updateDocumentForConfig({
+          roots: bridgeConfig.roots,
+          roamRoots: bridgeConfig.roamRoots,
+          path,
+          raw: nextRaw,
+        }),
+    );
     queryClient.setQueryData(
       [
         "document",
@@ -1129,102 +1134,100 @@ export default function LibraryScreen() {
           </View>
 
           {showDocument && (
-            <ScrollView
+            <FlatList
               testID="document-scroll"
               style={styles.documentScroll}
+              data={visibleBlocks}
+              keyExtractor={(block) => block.id}
               contentContainerStyle={{ paddingBottom: 48 }}
-            >
-              {documentQuery.isFetching && (
-                <ActivityIndicator
-                  style={{ marginVertical: 24 }}
-                  color="#AFC0FF"
-                />
-              )}
-              {!documentQuery.isFetching &&
-                documentQuery.data &&
-                blocks.length > 0 && (
-                  <View style={styles.blocksContainer}>
-                    {visibleBlocks.map((block) => {
-                      const isEditing = editingBlockId === block.id;
-                      return (
-                        <View
-                          key={block.id}
-                          testID={`org-block-card-${block.node.type}-${block.node.line_start}`}
-                          style={[
-                            styles.blockCard,
-                            block.node.type === "heading" && styles.headingCard,
-                          ]}
-                        >
-                          <View style={styles.blockToolbar}>
-                            <Text style={styles.blockType}>
-                              {blockLabel(block.node)}
-                            </Text>
-                            <View style={styles.blockActions}>
-                              <TouchableOpacity
-                                testID={`block-move-up-${block.node.line_start}`}
-                                onPress={() => moveBlock(block, -1)}
-                                style={styles.smallAction}
-                              >
-                                <Text style={styles.smallActionText}>↑</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                testID={`block-move-down-${block.node.line_start}`}
-                                onPress={() => moveBlock(block, 1)}
-                                style={styles.smallAction}
-                              >
-                                <Text style={styles.smallActionText}>↓</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                testID={`block-edit-${block.node.line_start}`}
-                                onPress={() => startEditing(block)}
-                                style={styles.smallAction}
-                              >
-                                <Text style={styles.smallActionText}>Edit</Text>
-                              </TouchableOpacity>
-                            </View>
-                          </View>
-                          {isEditing ? (
-                            <View>
-                              <TextInput
-                                testID="block-editor"
-                                style={styles.blockEditor}
-                                value={draftRaw}
-                                onChangeText={setDraftRaw}
-                                multiline
-                                autoCapitalize="none"
-                                autoCorrect={false}
-                              />
-                              <View style={styles.editActions}>
-                                <TouchableOpacity
-                                  style={styles.cancelButton}
-                                  onPress={() => setEditingBlockId(null)}
-                                >
-                                  <Text style={styles.cancelText}>Cancel</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  testID="block-save"
-                                  style={styles.saveButton}
-                                  onPress={() => saveBlockEdit(block)}
-                                >
-                                  <Text style={styles.saveText}>Save</Text>
-                                </TouchableOpacity>
-                              </View>
-                            </View>
-                          ) : (
-                            renderOrgNode(block.node, block.projection)
-                          )}
-                        </View>
-                      );
-                    })}
-                  </View>
-                )}
-              {!documentQuery.isFetching &&
-                (!documentQuery.data || blocks.length === 0) && (
+              ListHeaderComponent={() =>
+                documentQuery.isFetching ? (
+                  <ActivityIndicator
+                    style={{ marginVertical: 24 }}
+                    color="#AFC0FF"
+                  />
+                ) : null
+              }
+              ListEmptyComponent={() =>
+                !documentQuery.isFetching &&
+                (!documentQuery.data || blocks.length === 0) ? (
                   <Text style={styles.emptyDocument}>
                     Select an Org file to view its contents.
                   </Text>
-                )}
-            </ScrollView>
+                ) : null
+              }
+              renderItem={({ item: block }) => {
+                const isEditing = editingBlockId === block.id;
+                return (
+                  <View
+                    testID={`org-block-card-${block.node.type}-${block.node.line_start}`}
+                    style={[
+                      styles.blockCard,
+                      block.node.type === "heading" && styles.headingCard,
+                    ]}
+                  >
+                    <View style={styles.blockToolbar}>
+                      <Text style={styles.blockType}>
+                        {blockLabel(block.node)}
+                      </Text>
+                      <View style={styles.blockActions}>
+                        <TouchableOpacity
+                          testID={`block-move-up-${block.node.line_start}`}
+                          onPress={() => moveBlock(block, -1)}
+                          style={styles.smallAction}
+                        >
+                          <Text style={styles.smallActionText}>↑</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          testID={`block-move-down-${block.node.line_start}`}
+                          onPress={() => moveBlock(block, 1)}
+                          style={styles.smallAction}
+                        >
+                          <Text style={styles.smallActionText}>↓</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          testID={`block-edit-${block.node.line_start}`}
+                          onPress={() => startEditing(block)}
+                          style={styles.smallAction}
+                        >
+                          <Text style={styles.smallActionText}>Edit</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    {isEditing ? (
+                      <View>
+                        <TextInput
+                          testID="block-editor"
+                          style={styles.blockEditor}
+                          value={draftRaw}
+                          onChangeText={setDraftRaw}
+                          multiline
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                        />
+                        <View style={styles.editActions}>
+                          <TouchableOpacity
+                            style={styles.cancelButton}
+                            onPress={() => setEditingBlockId(null)}
+                          >
+                            <Text style={styles.cancelText}>Cancel</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            testID="block-save"
+                            style={styles.saveButton}
+                            onPress={() => saveBlockEdit(block)}
+                          >
+                            <Text style={styles.saveText}>Save</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : (
+                      renderOrgNode(block.node, block.projection)
+                    )}
+                  </View>
+                );
+              }}
+            />
           )}
         </View>
       )}
@@ -1291,7 +1294,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  gridMeta: { color: "#F0F4EA", fontSize: 22, lineHeight: 28, fontWeight: "800" },
+  gridMeta: {
+    color: "#F0F4EA",
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: "800",
+  },
   gridMetaDetails: { alignItems: "flex-end", gap: 2 },
   noteCountText: { color: "#9BA394", fontSize: 15, fontWeight: "700" },
   latencyText: { color: "#747B6F", fontSize: 11 },

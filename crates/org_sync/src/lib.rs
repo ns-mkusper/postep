@@ -111,7 +111,7 @@ impl OrgSyncService {
             .find(|candidate| candidate.id == job.root_id)
             .with_context(|| format!("unknown sync root `{}`", job.root_id))?;
 
-        let mut service = make_service(root)?;
+        let service = make_service(root)?;
         match job.job_kind {
             SyncJobKind::InitialScan | SyncJobKind::LocalWatcher => {
                 service.reload_all()?;
