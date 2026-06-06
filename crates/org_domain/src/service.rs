@@ -58,7 +58,7 @@ impl OrgServiceBuilder {
     }
 
     pub fn build(self) -> Result<OrgService> {
-        let mut service = OrgService {
+        let service = OrgService {
             roots: self.roots,
             documents: RwLock::new(HashMap::new()),
             watcher: None,
@@ -99,7 +99,7 @@ impl OrgService {
         Ok(())
     }
 
-    pub fn reload_all(&mut self) -> Result<()> {
+    pub fn reload_all(&self) -> Result<()> {
         let mut docs = self.documents.write();
         docs.clear();
         for root in self.unique_roots() {

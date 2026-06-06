@@ -12,9 +12,9 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
-  loadAgendaSnapshot,
-  setAgendaStatus,
-  AgendaItem,
+  loadAgendaSnapshotAsync,
+  setAgendaStatusAsync,
+  type AgendaItem,
 } from "@postep/bridge";
 import { useBridgeConfig } from "../../store/orgConfig";
 import { useBridgeEvent } from "../../hooks/useBridgeEvent";
@@ -213,7 +213,7 @@ export default function AgendaScreen() {
     queryFn: () =>
       config.roots.length === 0
         ? Promise.resolve({ items: [], habits: [] })
-        : Promise.resolve(loadAgendaSnapshot(config)),
+        : loadAgendaSnapshotAsync(config),
   });
 
   useBridgeEvent("agendaChanged", () => agendaQuery.refetch());
@@ -229,7 +229,7 @@ export default function AgendaScreen() {
       return;
     }
     try {
-      const snapshot = setAgendaStatus({
+      const snapshot = await setAgendaStatusAsync({
         roots: config.roots,
         roamRoots: config.roamRoots,
         path: item.path,

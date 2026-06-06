@@ -17,9 +17,10 @@ import { router, useNavigation } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
-  listDocuments,
-  loadDocument,
-  updateDocument,
+  listDocumentsAsync,
+  loadDocumentAsync,
+  updateDocumentAsync,
+  type DocumentPayload,
   type DocumentRef,
   type LexicalNode,
 } from "@postep/bridge";
@@ -28,6 +29,7 @@ import { useBridgeEvent } from "../../hooks/useBridgeEvent";
 import { useBridgeConfig } from "../../store/orgConfig";
 import {
   createBlockViewModels,
+  measureAsyncInteraction,
   measureInteraction,
   moveRawBlock,
   updateRawBlock,
@@ -152,11 +154,10 @@ function titleFromDocument(doc: DocumentRef, nodes: LexicalNode[]) {
   return doc.name.replace(/\.org$/i, "");
 }
 
-function buildPreview(
+function buildPreviewFromPayload(
   doc: DocumentRef,
-  config: { roots: string[]; roamRoots?: string[] },
+  payload: DocumentPayload,
 ): NotePreview {
-  const payload = loadDocument(config, doc.path);
   const title = titleFromDocument(doc, payload.lexical);
   const firstHeading = payload.lexical.find(
     (node): node is Extract<LexicalNode, { type: "heading" }> =>
@@ -498,7 +499,7 @@ export default function LibraryScreen() {
     queryFn: () =>
       bridgeConfig.roots.length === 0
         ? Promise.resolve([])
-        : Promise.resolve(listDocuments(bridgeConfig)),
+        : listDocumentsAsync(bridgeConfig),
   });
 
   useEffect(() => {
@@ -512,27 +513,36 @@ export default function LibraryScreen() {
     }
   }, [documentsQuery.data, selectedPath]);
 
-  const noteGrid = useMemo(() => {
-    if (!documentsQuery.data || bridgeConfig.roots.length === 0) {
-      return { value: [] as NotePreview[], metric: { elapsedMs: 0 } };
-    }
-    return measureInteraction("noteGrid", () =>
-      documentsQuery.data
-        .map((doc) => buildPreview(doc, bridgeConfig))
-        .sort((left, right) =>
-          (left.primaryDate ?? "9999-12-31").localeCompare(
-            right.primaryDate ?? "9999-12-31",
-          ),
-        ),
-    );
-  }, [bridgeConfig, documentsQuery.data]);
+  const noteGridQuery = useQuery({
+    queryKey: [
+      "noteGrid",
+      bridgeConfig.roots.join(":"),
+      bridgeConfig.roamRoots?.join(":") ?? "",
+      documentsQuery.data?.map((doc) => doc.path).join("|") ?? "",
+    ],
+    enabled: Boolean(documentsQuery.data) && bridgeConfig.roots.length > 0,
+    queryFn: () =>
+      measureAsyncInteraction("noteGrid", async () => {
+        const docs = documentsQuery.data ?? [];
+        const payloads = await Promise.all(
+          docs.map((doc) => loadDocumentAsync(bridgeConfig, doc.path)),
+        );
+        return docs
+          .map((doc, index) => buildPreviewFromPayload(doc, payloads[index]))
+          .sort((left, right) =>
+            (left.primaryDate ?? "9999-12-31").localeCompare(
+              right.primaryDate ?? "9999-12-31",
+            ),
+          );
+      }),
+  });
 
   const visibleNotes = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) {
-      return noteGrid.value;
+      return noteGridQuery.data?.value ?? [];
     }
-    return noteGrid.value.filter((note) => {
+    return (noteGridQuery.data?.value ?? []).filter((note) => {
       const searchable = [
         note.title,
         note.doc.name,
@@ -543,7 +553,7 @@ export default function LibraryScreen() {
         .toLowerCase();
       return searchable.includes(query);
     });
-  }, [noteGrid.value, searchQuery]);
+  }, [noteGridQuery.data?.value, searchQuery]);
 
   const documentQuery = useQuery({
     queryKey: [
@@ -553,7 +563,7 @@ export default function LibraryScreen() {
       bridgeConfig.roamRoots?.join(":") ?? "",
     ],
     enabled: Boolean(selectedPath) && bridgeConfig.roots.length > 0,
-    queryFn: () => Promise.resolve(loadDocument(bridgeConfig, selectedPath!)),
+    queryFn: () => loadDocumentAsync(bridgeConfig, selectedPath!),
   });
 
   const blockModel = useMemo(
@@ -599,14 +609,21 @@ export default function LibraryScreen() {
   useEffect(() => {
     const metric = selectedPath
       ? blockModel.metric.elapsedMs
-      : noteGrid.metric.elapsedMs;
+      : (noteGridQuery.data?.metric.elapsedMs ?? 0);
     const label = selectedPath ? "Render model" : "Card grid";
     setInteractionStatus(`${label} ${metric.toFixed(2)}ms`);
-  }, [blockModel.metric.elapsedMs, noteGrid.metric.elapsedMs, selectedPath]);
+  }, [
+    blockModel.metric.elapsedMs,
+    noteGridQuery.data?.metric.elapsedMs,
+    selectedPath,
+  ]);
 
   const onRefreshDocuments = () => {
     queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] === "documents",
+    });
+    queryClient.invalidateQueries({
+      predicate: (query) => query.queryKey[0] === "noteGrid",
     });
     queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] === "document",
@@ -616,22 +633,25 @@ export default function LibraryScreen() {
   useBridgeEvent("documentsChanged", onRefreshDocuments);
   useBridgeEvent("rootsChanged", onRefreshDocuments);
 
-  const persistRaw = (raw: string, label: string) => {
+  const persistRaw = async (raw: string, label: string) => {
     if (!selectedPath || bridgeConfig.roots.length === 0) {
       return;
     }
-    const { value: payload, metric } = measureInteraction(label, () =>
-      updateDocument({
-        roots: bridgeConfig.roots,
-        roamRoots: bridgeConfig.roamRoots,
-        path: selectedPath,
-        raw,
-      }),
+    const path = selectedPath;
+    const { value: payload, metric } = await measureAsyncInteraction(
+      label,
+      () =>
+        updateDocumentAsync({
+          roots: bridgeConfig.roots,
+          roamRoots: bridgeConfig.roamRoots,
+          path,
+          raw,
+        }),
     );
     queryClient.setQueryData(
       [
         "document",
-        selectedPath,
+        path,
         bridgeConfig.roots.join(":"),
         bridgeConfig.roamRoots?.join(":") ?? "",
       ],
@@ -643,6 +663,9 @@ export default function LibraryScreen() {
     queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] === "documents",
     });
+    queryClient.invalidateQueries({
+      predicate: (query) => query.queryKey[0] === "noteGrid",
+    });
     setInteractionStatus(`${label} ${metric.elapsedMs.toFixed(2)}ms`);
   };
 
@@ -651,40 +674,40 @@ export default function LibraryScreen() {
     setDraftRaw(block.rawText);
   };
 
-  const saveBlockEdit = (block: OrgBlockViewModel) => {
+  const saveBlockEdit = async (block: OrgBlockViewModel) => {
     const raw = documentQuery.data?.raw ?? "";
     const nextRaw = updateRawBlock(raw, block.node, draftRaw);
-    persistRaw(nextRaw, "blockEdit");
+    await persistRaw(nextRaw, "blockEdit");
     setEditingBlockId(null);
     setDraftRaw("");
   };
 
-  const moveBlock = (block: OrgBlockViewModel, direction: -1 | 1) => {
+  const moveBlock = async (block: OrgBlockViewModel, direction: -1 | 1) => {
     const raw = documentQuery.data?.raw ?? "";
     const { value: nextRaw, metric } = measureInteraction("blockMove", () =>
       moveRawBlock(raw, block.node, direction),
     );
     setInteractionStatus(`blockMove ${metric.elapsedMs.toFixed(2)}ms`);
     if (nextRaw !== raw) {
-      persistRaw(nextRaw, "persistMove");
+      await persistRaw(nextRaw, "persistMove");
     }
   };
 
   const openDrawer = () => navigation.dispatch(DrawerActions.openDrawer());
 
-  const toggleChecklistItem = (path: string, lineStart?: number) => {
+  const toggleChecklistItem = async (path: string, lineStart?: number) => {
     if (lineStart === undefined || bridgeConfig.roots.length === 0) {
       return;
     }
-    const payload = loadDocument(bridgeConfig, path);
+    const payload = await loadDocumentAsync(bridgeConfig, path);
     const nextRaw = toggleRawCheckbox(payload.raw, lineStart);
     if (nextRaw === payload.raw) {
       return;
     }
-    const { value: nextPayload, metric } = measureInteraction(
+    const { value: nextPayload, metric } = await measureAsyncInteraction(
       "checklistToggle",
       () =>
-        updateDocument({
+        updateDocumentAsync({
           roots: bridgeConfig.roots,
           roamRoots: bridgeConfig.roamRoots,
           path,
@@ -704,6 +727,9 @@ export default function LibraryScreen() {
       predicate: (query) => query.queryKey[0] === "documents",
     });
     queryClient.invalidateQueries({
+      predicate: (query) => query.queryKey[0] === "noteGrid",
+    });
+    queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] === "agenda",
     });
     setInteractionStatus(`checklistToggle ${metric.elapsedMs.toFixed(2)}ms`);
@@ -718,7 +744,7 @@ export default function LibraryScreen() {
     toggleChecklistItem(path, lineStart);
   };
 
-  const addChecklistItem = () => {
+  const addChecklistItem = async () => {
     if (!selectedPath || !documentQuery.data || !newChecklistText.trim()) {
       return;
     }
@@ -726,7 +752,7 @@ export default function LibraryScreen() {
       documentQuery.data.raw,
       newChecklistText,
     );
-    persistRaw(nextRaw, "checklistAdd");
+    await persistRaw(nextRaw, "checklistAdd");
     setNewChecklistText("");
   };
 
@@ -1099,102 +1125,100 @@ export default function LibraryScreen() {
           </View>
 
           {showDocument && (
-            <ScrollView
+            <FlatList
               testID="document-scroll"
               style={styles.documentScroll}
+              data={visibleBlocks}
+              keyExtractor={(block) => block.id}
               contentContainerStyle={{ paddingBottom: 48 }}
-            >
-              {documentQuery.isFetching && (
-                <ActivityIndicator
-                  style={{ marginVertical: 24 }}
-                  color="#AFC0FF"
-                />
-              )}
-              {!documentQuery.isFetching &&
-                documentQuery.data &&
-                blocks.length > 0 && (
-                  <View style={styles.blocksContainer}>
-                    {visibleBlocks.map((block) => {
-                      const isEditing = editingBlockId === block.id;
-                      return (
-                        <View
-                          key={block.id}
-                          testID={`org-block-card-${block.node.type}-${block.node.line_start}`}
-                          style={[
-                            styles.blockCard,
-                            block.node.type === "heading" && styles.headingCard,
-                          ]}
-                        >
-                          <View style={styles.blockToolbar}>
-                            <Text style={styles.blockType}>
-                              {blockLabel(block.node)}
-                            </Text>
-                            <View style={styles.blockActions}>
-                              <TouchableOpacity
-                                testID={`block-move-up-${block.node.line_start}`}
-                                onPress={() => moveBlock(block, -1)}
-                                style={styles.smallAction}
-                              >
-                                <Text style={styles.smallActionText}>↑</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                testID={`block-move-down-${block.node.line_start}`}
-                                onPress={() => moveBlock(block, 1)}
-                                style={styles.smallAction}
-                              >
-                                <Text style={styles.smallActionText}>↓</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                testID={`block-edit-${block.node.line_start}`}
-                                onPress={() => startEditing(block)}
-                                style={styles.smallAction}
-                              >
-                                <Text style={styles.smallActionText}>Edit</Text>
-                              </TouchableOpacity>
-                            </View>
-                          </View>
-                          {isEditing ? (
-                            <View>
-                              <TextInput
-                                testID="block-editor"
-                                style={styles.blockEditor}
-                                value={draftRaw}
-                                onChangeText={setDraftRaw}
-                                multiline
-                                autoCapitalize="none"
-                                autoCorrect={false}
-                              />
-                              <View style={styles.editActions}>
-                                <TouchableOpacity
-                                  style={styles.cancelButton}
-                                  onPress={() => setEditingBlockId(null)}
-                                >
-                                  <Text style={styles.cancelText}>Cancel</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  testID="block-save"
-                                  style={styles.saveButton}
-                                  onPress={() => saveBlockEdit(block)}
-                                >
-                                  <Text style={styles.saveText}>Save</Text>
-                                </TouchableOpacity>
-                              </View>
-                            </View>
-                          ) : (
-                            renderOrgNode(block.node, block.projection)
-                          )}
-                        </View>
-                      );
-                    })}
-                  </View>
-                )}
-              {!documentQuery.isFetching &&
-                (!documentQuery.data || blocks.length === 0) && (
+              ListHeaderComponent={() =>
+                documentQuery.isFetching ? (
+                  <ActivityIndicator
+                    style={{ marginVertical: 24 }}
+                    color="#AFC0FF"
+                  />
+                ) : null
+              }
+              ListEmptyComponent={() =>
+                !documentQuery.isFetching &&
+                (!documentQuery.data || blocks.length === 0) ? (
                   <Text style={styles.emptyDocument}>
                     Select an Org file to view its contents.
                   </Text>
-                )}
-            </ScrollView>
+                ) : null
+              }
+              renderItem={({ item: block }) => {
+                const isEditing = editingBlockId === block.id;
+                return (
+                  <View
+                    testID={`org-block-card-${block.node.type}-${block.node.line_start}`}
+                    style={[
+                      styles.blockCard,
+                      block.node.type === "heading" && styles.headingCard,
+                    ]}
+                  >
+                    <View style={styles.blockToolbar}>
+                      <Text style={styles.blockType}>
+                        {blockLabel(block.node)}
+                      </Text>
+                      <View style={styles.blockActions}>
+                        <TouchableOpacity
+                          testID={`block-move-up-${block.node.line_start}`}
+                          onPress={() => moveBlock(block, -1)}
+                          style={styles.smallAction}
+                        >
+                          <Text style={styles.smallActionText}>↑</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          testID={`block-move-down-${block.node.line_start}`}
+                          onPress={() => moveBlock(block, 1)}
+                          style={styles.smallAction}
+                        >
+                          <Text style={styles.smallActionText}>↓</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          testID={`block-edit-${block.node.line_start}`}
+                          onPress={() => startEditing(block)}
+                          style={styles.smallAction}
+                        >
+                          <Text style={styles.smallActionText}>Edit</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    {isEditing ? (
+                      <View>
+                        <TextInput
+                          testID="block-editor"
+                          style={styles.blockEditor}
+                          value={draftRaw}
+                          onChangeText={setDraftRaw}
+                          multiline
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                        />
+                        <View style={styles.editActions}>
+                          <TouchableOpacity
+                            style={styles.cancelButton}
+                            onPress={() => setEditingBlockId(null)}
+                          >
+                            <Text style={styles.cancelText}>Cancel</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            testID="block-save"
+                            style={styles.saveButton}
+                            onPress={() => saveBlockEdit(block)}
+                          >
+                            <Text style={styles.saveText}>Save</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : (
+                      renderOrgNode(block.node, block.projection)
+                    )}
+                  </View>
+                );
+              }}
+            />
           )}
         </View>
       )}
@@ -1261,7 +1285,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  gridMeta: { color: "#F0F4EA", fontSize: 22, lineHeight: 28, fontWeight: "800" },
+  gridMeta: {
+    color: "#F0F4EA",
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: "800",
+  },
   gridMetaDetails: { alignItems: "flex-end", gap: 2 },
   noteCountText: { color: "#9BA394", fontSize: 15, fontWeight: "700" },
   latencyText: { color: "#747B6F", fontSize: 11 },

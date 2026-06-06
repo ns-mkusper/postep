@@ -8,7 +8,7 @@ import {
 } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { appendCaptureEntry } from "@postep/bridge";
+import { appendCaptureEntryAsync } from "@postep/bridge";
 import { useBridgeConfig } from "../../store/orgConfig";
 
 export default function CaptureScreen() {
@@ -18,13 +18,13 @@ export default function CaptureScreen() {
   const [targetPath, setTargetPath] = useState("inbox.org");
   const [status, setStatus] = useState<string | null>(null);
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (config.roots.length === 0) {
       setStatus("Please add an Org root first.");
       return;
     }
     try {
-      const snapshot = appendCaptureEntry({
+      const snapshot = await appendCaptureEntryAsync({
         roots: config.roots,
         roamRoots: config.roamRoots,
         targetPath,
