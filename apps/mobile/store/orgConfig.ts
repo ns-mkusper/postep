@@ -15,8 +15,15 @@ const isE2E = process.env.EXPO_PUBLIC_POSTEP_E2E === '1' || isE2EMode();
 const initialRoots = isE2E ? [E2E_ORG_ROOT] : [];
 const initialRoamRoots = isE2E ? [E2E_ORG_ROOT] : [];
 
+const isSafUri = (uri: string) => uri.startsWith('content://');
+
 const syncNative = (roots: string[], roamRoots: string[]) => {
-  setRoots({ roots, ...(roamRoots.length > 0 ? { roamRoots } : {}) });
+  const nativeRoots = roots.filter((root) => !isSafUri(root));
+  const nativeRoamRoots = roamRoots.filter((root) => !isSafUri(root));
+  setRoots({
+    roots: nativeRoots,
+    ...(nativeRoamRoots.length > 0 ? { roamRoots: nativeRoamRoots } : {})
+  });
   emitBridgeEvent('rootsChanged');
 };
 

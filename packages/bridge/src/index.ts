@@ -314,6 +314,10 @@ export function loadDocument(config: OrgBridgeConfig, path: string): DocumentPay
   return resolveNativeBinding().load_document(config, path);
 }
 
+export function parseOrgDocument(raw: string, path = ''): DocumentPayload {
+  return { path, raw, lexical: rawToLexical(raw) };
+}
+
 export function updateDocument(request: UpdateDocumentRequest): DocumentPayload {
   if (request.roots.length === 0) {
     throw new Error('No Org roots configured');
