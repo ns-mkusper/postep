@@ -17,9 +17,6 @@ import { router, useNavigation } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
-  listDocumentsAsync,
-  loadDocumentAsync,
-  updateDocumentAsync,
   type DocumentPayload,
   type DocumentRef,
   type LexicalNode,
@@ -35,6 +32,11 @@ import {
   updateRawBlock,
   type OrgBlockViewModel,
 } from "../../lib/orgLexicalModel";
+import {
+  listDocumentsForConfig,
+  loadDocumentForConfig,
+  updateDocumentForConfig,
+} from "../../lib/documentSources";
 
 type NoteLine = {
   text: string;
@@ -154,10 +156,7 @@ function titleFromDocument(doc: DocumentRef, nodes: LexicalNode[]) {
   return doc.name.replace(/\.org$/i, "");
 }
 
-function buildPreviewFromPayload(
-  doc: DocumentRef,
-  payload: DocumentPayload,
-): NotePreview {
+function buildPreview(doc: DocumentRef, payload: DocumentPayload): NotePreview {
   const title = titleFromDocument(doc, payload.lexical);
   const firstHeading = payload.lexical.find(
     (node): node is Extract<LexicalNode, { type: "heading" }> =>
@@ -496,10 +495,7 @@ export default function LibraryScreen() {
       bridgeConfig.roots.join(":"),
       bridgeConfig.roamRoots?.join(":") ?? "",
     ],
-    queryFn: () =>
-      bridgeConfig.roots.length === 0
-        ? Promise.resolve([])
-        : listDocumentsAsync(bridgeConfig),
+    queryFn: () => listDocumentsForConfig(bridgeConfig),
   });
 
   useEffect(() => {
@@ -513,22 +509,22 @@ export default function LibraryScreen() {
     }
   }, [documentsQuery.data, selectedPath]);
 
-  const noteGridQuery = useQuery({
+  const previewsQuery = useQuery({
     queryKey: [
-      "noteGrid",
+      "document-previews",
+      documentsQuery.data?.map((doc) => doc.path).join(":"),
       bridgeConfig.roots.join(":"),
       bridgeConfig.roamRoots?.join(":") ?? "",
-      documentsQuery.data?.map((doc) => doc.path).join("|") ?? "",
     ],
     enabled: Boolean(documentsQuery.data) && bridgeConfig.roots.length > 0,
     queryFn: () =>
       measureAsyncInteraction("noteGrid", async () => {
-        const docs = documentsQuery.data ?? [];
+        const documents = documentsQuery.data ?? [];
         const payloads = await Promise.all(
-          docs.map((doc) => loadDocumentAsync(bridgeConfig, doc.path)),
+          documents.map((doc) => loadDocumentForConfig(bridgeConfig, doc.path)),
         );
-        return docs
-          .map((doc, index) => buildPreviewFromPayload(doc, payloads[index]))
+        return documents
+          .map((doc, index) => buildPreview(doc, payloads[index]))
           .sort((left, right) =>
             (left.primaryDate ?? "9999-12-31").localeCompare(
               right.primaryDate ?? "9999-12-31",
@@ -537,12 +533,17 @@ export default function LibraryScreen() {
       }),
   });
 
+  const noteGrid = previewsQuery.data ?? {
+    value: [] as NotePreview[],
+    metric: { elapsedMs: 0 },
+  };
+
   const visibleNotes = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) {
-      return noteGridQuery.data?.value ?? [];
+      return noteGrid.value;
     }
-    return (noteGridQuery.data?.value ?? []).filter((note) => {
+    return noteGrid.value.filter((note) => {
       const searchable = [
         note.title,
         note.doc.name,
@@ -553,7 +554,7 @@ export default function LibraryScreen() {
         .toLowerCase();
       return searchable.includes(query);
     });
-  }, [noteGridQuery.data?.value, searchQuery]);
+  }, [noteGrid.value, searchQuery]);
 
   const documentQuery = useQuery({
     queryKey: [
@@ -563,7 +564,7 @@ export default function LibraryScreen() {
       bridgeConfig.roamRoots?.join(":") ?? "",
     ],
     enabled: Boolean(selectedPath) && bridgeConfig.roots.length > 0,
-    queryFn: () => loadDocumentAsync(bridgeConfig, selectedPath!),
+    queryFn: () => loadDocumentForConfig(bridgeConfig, selectedPath!),
   });
 
   const blockModel = useMemo(
@@ -609,21 +610,17 @@ export default function LibraryScreen() {
   useEffect(() => {
     const metric = selectedPath
       ? blockModel.metric.elapsedMs
-      : (noteGridQuery.data?.metric.elapsedMs ?? 0);
+      : noteGrid.metric.elapsedMs;
     const label = selectedPath ? "Render model" : "Card grid";
     setInteractionStatus(`${label} ${metric.toFixed(2)}ms`);
-  }, [
-    blockModel.metric.elapsedMs,
-    noteGridQuery.data?.metric.elapsedMs,
-    selectedPath,
-  ]);
+  }, [blockModel.metric.elapsedMs, noteGrid.metric.elapsedMs, selectedPath]);
 
   const onRefreshDocuments = () => {
     queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] === "documents",
     });
     queryClient.invalidateQueries({
-      predicate: (query) => query.queryKey[0] === "noteGrid",
+      predicate: (query) => query.queryKey[0] === "document-previews",
     });
     queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] === "document",
@@ -641,7 +638,7 @@ export default function LibraryScreen() {
     const { value: payload, metric } = await measureAsyncInteraction(
       label,
       () =>
-        updateDocumentAsync({
+        updateDocumentForConfig({
           roots: bridgeConfig.roots,
           roamRoots: bridgeConfig.roamRoots,
           path,
@@ -664,7 +661,7 @@ export default function LibraryScreen() {
       predicate: (query) => query.queryKey[0] === "documents",
     });
     queryClient.invalidateQueries({
-      predicate: (query) => query.queryKey[0] === "noteGrid",
+      predicate: (query) => query.queryKey[0] === "document-previews",
     });
     setInteractionStatus(`${label} ${metric.elapsedMs.toFixed(2)}ms`);
   };
@@ -674,22 +671,22 @@ export default function LibraryScreen() {
     setDraftRaw(block.rawText);
   };
 
-  const saveBlockEdit = async (block: OrgBlockViewModel) => {
+  const saveBlockEdit = (block: OrgBlockViewModel) => {
     const raw = documentQuery.data?.raw ?? "";
     const nextRaw = updateRawBlock(raw, block.node, draftRaw);
-    await persistRaw(nextRaw, "blockEdit");
+    void persistRaw(nextRaw, "blockEdit");
     setEditingBlockId(null);
     setDraftRaw("");
   };
 
-  const moveBlock = async (block: OrgBlockViewModel, direction: -1 | 1) => {
+  const moveBlock = (block: OrgBlockViewModel, direction: -1 | 1) => {
     const raw = documentQuery.data?.raw ?? "";
     const { value: nextRaw, metric } = measureInteraction("blockMove", () =>
       moveRawBlock(raw, block.node, direction),
     );
     setInteractionStatus(`blockMove ${metric.elapsedMs.toFixed(2)}ms`);
     if (nextRaw !== raw) {
-      await persistRaw(nextRaw, "persistMove");
+      void persistRaw(nextRaw, "persistMove");
     }
   };
 
@@ -699,7 +696,7 @@ export default function LibraryScreen() {
     if (lineStart === undefined || bridgeConfig.roots.length === 0) {
       return;
     }
-    const payload = await loadDocumentAsync(bridgeConfig, path);
+    const payload = await loadDocumentForConfig(bridgeConfig, path);
     const nextRaw = toggleRawCheckbox(payload.raw, lineStart);
     if (nextRaw === payload.raw) {
       return;
@@ -707,7 +704,7 @@ export default function LibraryScreen() {
     const { value: nextPayload, metric } = await measureAsyncInteraction(
       "checklistToggle",
       () =>
-        updateDocumentAsync({
+        updateDocumentForConfig({
           roots: bridgeConfig.roots,
           roamRoots: bridgeConfig.roamRoots,
           path,
@@ -727,7 +724,7 @@ export default function LibraryScreen() {
       predicate: (query) => query.queryKey[0] === "documents",
     });
     queryClient.invalidateQueries({
-      predicate: (query) => query.queryKey[0] === "noteGrid",
+      predicate: (query) => query.queryKey[0] === "document-previews",
     });
     queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] === "agenda",
@@ -741,10 +738,10 @@ export default function LibraryScreen() {
     lineStart?: number,
   ) => {
     event.stopPropagation();
-    toggleChecklistItem(path, lineStart);
+    void toggleChecklistItem(path, lineStart);
   };
 
-  const addChecklistItem = async () => {
+  const addChecklistItem = () => {
     if (!selectedPath || !documentQuery.data || !newChecklistText.trim()) {
       return;
     }
@@ -752,7 +749,7 @@ export default function LibraryScreen() {
       documentQuery.data.raw,
       newChecklistText,
     );
-    await persistRaw(nextRaw, "checklistAdd");
+    void persistRaw(nextRaw, "checklistAdd");
     setNewChecklistText("");
   };
 
@@ -762,7 +759,7 @@ export default function LibraryScreen() {
       <TouchableOpacity
         testID={`detail-checkbox-${item.lineStart}`}
         onPress={() =>
-          selectedPath && toggleChecklistItem(selectedPath, item.lineStart)
+          selectedPath && void toggleChecklistItem(selectedPath, item.lineStart)
         }
         style={[
           styles.detailCheckbox,
@@ -1032,10 +1029,11 @@ export default function LibraryScreen() {
         </View>
         <TouchableOpacity
           style={styles.avatarButton}
-          onPress={onRefreshDocuments}
-          testID="refresh-notes"
+          onPress={() => router.push("/settings")}
+          testID="profile-button"
+          accessibilityLabel="Open settings"
         >
-          <Text style={styles.avatarText}>↻</Text>
+          <Text style={styles.avatarText}>P</Text>
         </TouchableOpacity>
       </View>
 
@@ -1064,6 +1062,17 @@ export default function LibraryScreen() {
               numColumns > 1 ? styles.columnWrapper : undefined
             }
             contentContainerStyle={styles.noteGrid}
+            refreshing={documentsQuery.isFetching || previewsQuery.isFetching}
+            onRefresh={onRefreshDocuments}
+            ListHeaderComponent={() =>
+              bridgeConfig.roots.length > 0 &&
+              (documentsQuery.isFetching || previewsQuery.isFetching) ? (
+                <View style={styles.loadingSourceBanner}>
+                  <ActivityIndicator color="#AFC0FF" />
+                  <Text style={styles.loadingSourceText}>Loading notes…</Text>
+                </View>
+              ) : null
+            }
             ListEmptyComponent={() => (
               <View style={styles.emptyDocs}>
                 <Text style={styles.emptyDocsText}>
@@ -1229,53 +1238,53 @@ export default function LibraryScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#071008" },
   postepHeader: {
-    paddingTop: 18,
+    paddingTop: 8,
     paddingHorizontal: 14,
-    paddingBottom: 6,
+    paddingBottom: 10,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
     backgroundColor: "#071008",
   },
   iconButton: {
-    width: 48,
-    height: 48,
+    width: 42,
+    height: 42,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 18,
   },
-  menuIcon: { color: "#DCE2D3", fontSize: 32, lineHeight: 36 },
+  menuIcon: { color: "#DCE2D3", fontSize: 26, lineHeight: 30 },
   searchPill: {
     flex: 1,
-    minHeight: 58,
-    borderRadius: 32,
+    minHeight: 46,
+    borderRadius: 24,
     backgroundColor: "#152014",
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
     flexDirection: "row",
     alignItems: "center",
-    gap: 20,
+    gap: 10,
   },
   searchInput: {
     flex: 1,
     color: "#F2F5EC",
-    fontSize: 22,
-    lineHeight: 28,
+    fontSize: 18,
+    lineHeight: 24,
     fontWeight: "500",
     paddingVertical: 0,
     minWidth: 0,
   },
-  searchIcon: { color: "#B9C0B2", fontSize: 26, fontWeight: "700" },
+  searchIcon: { color: "#B9C0B2", fontSize: 21, fontWeight: "700" },
   avatarButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 18,
+    width: 42,
+    height: 42,
+    borderRadius: 16,
     borderWidth: 1.5,
     borderColor: "#3A4536",
     backgroundColor: "#111A10",
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { color: "#E5EBDD", fontWeight: "800", fontSize: 22 },
+  avatarText: { color: "#E5EBDD", fontWeight: "800", fontSize: 18 },
   gridScreen: { flex: 1 },
   gridMetaRow: {
     paddingHorizontal: 16,
@@ -1295,6 +1304,20 @@ const styles = StyleSheet.create({
   noteCountText: { color: "#9BA394", fontSize: 15, fontWeight: "700" },
   latencyText: { color: "#747B6F", fontSize: 11 },
   noteGrid: { paddingHorizontal: 10, paddingBottom: 118, paddingTop: 2 },
+  loadingSourceBanner: {
+    marginHorizontal: 6,
+    marginBottom: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#303B2D",
+    backgroundColor: "#111A10",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  loadingSourceText: { color: "#DDE5D4", fontSize: 15, fontWeight: "700" },
   columnWrapper: { gap: 10, alignItems: "flex-start" },
   noteCard: {
     flex: 1,
@@ -1428,9 +1451,9 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 24,
     bottom: 30,
-    width: 78,
-    height: 78,
-    borderRadius: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 18,
     backgroundColor: "#4D5F31",
     alignItems: "center",
     justifyContent: "center",
@@ -1439,8 +1462,8 @@ const styles = StyleSheet.create({
   },
   fabText: {
     color: "#F1F6E8",
-    fontSize: 48,
-    lineHeight: 54,
+    fontSize: 28,
+    lineHeight: 32,
     fontWeight: "300",
   },
   listEditorScreen: { flex: 1, backgroundColor: "#071008" },

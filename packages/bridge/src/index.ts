@@ -514,6 +514,10 @@ export async function listDocumentsAsync(
   return documentRefsFromPaths(entries);
 }
 
+export function parseOrgDocument(raw: string, path = ""): DocumentPayload {
+  return { path, raw, lexical: rawToLexical(raw) };
+}
+
 export function loadDocument(
   config: OrgBridgeConfig,
   path: string,
