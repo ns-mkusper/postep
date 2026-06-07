@@ -109,7 +109,7 @@ During onboarding, the app asks for the Org-roam directory (can be different fro
 6. **QA & Android hardening**: UX performance tests, web E2E, Android emulator screenshots, offline resilience, and release packaging.
 
 ## Migration Notes
-- Keep current `egui` desktop shell temporarily (`crates/org_app_legacy`) until the Lexical app reaches feature parity; reuse Rust crates underneath both front-ends.
+- The legacy desktop shell has been removed; the Expo/React Native Lexical app is the app surface.
 - Provide migration CLI to copy user settings (roots, agendas) into the new configuration files stored as Org drawers or JSON.
 
 ## Risks

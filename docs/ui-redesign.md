@@ -73,5 +73,5 @@ Quick entry tailored for Postep workflows.
 
 ## Deprecations from Legacy UI
 - Remove the legacy two-button `Documents/Agenda` toggle.
-- Replace `egui` layout assumptions with navigation-aware state machines in the React Native app.
+- Use navigation-aware state machines in the React Native app.
 - Retire the static split pane; use adaptive layout that shows sidebar only on tablets/desktop.
