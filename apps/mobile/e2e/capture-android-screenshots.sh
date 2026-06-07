@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-e2e-artifacts/android-screenshots}"
 APP_ID="${APP_ID:-com.postep.mobile}"
+APP_ACTIVITY="${APP_ACTIVITY:-${APP_ID}/.MainActivity}"
 APK_PATH="${APK_PATH:-android/app/build/outputs/apk/debug/app-debug.apk}"
 METRO_PORT="${METRO_PORT:-8081}"
 EXPO_LOG="${EXPO_LOG:-/tmp/postep-expo-screenshots-${METRO_PORT}.log}"
@@ -92,8 +93,17 @@ wait_for_text() {
   local deadline=$((SECONDS + timeout_seconds))
 
   while (( SECONDS < deadline )); do
-    if adb_cmd shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 && adb_cmd exec-out cat /sdcard/window.xml | grep -Fq "$text"; then
-      return 0
+    if adb_cmd shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1; then
+      local window_xml
+      window_xml="$(adb_cmd exec-out cat /sdcard/window.xml || true)"
+      if grep -Fq "$text" <<<"$window_xml"; then
+        return 0
+      fi
+      if grep -Fq "isn't responding" <<<"$window_xml"; then
+        log "Dismissing Android ANR dialog while waiting for: $text"
+        adb_cmd shell input tap 540 1360 || true
+        adb_cmd shell am start -W -n "$APP_ACTIVITY" >/dev/null || true
+      fi
     fi
     sleep 2
   done
@@ -184,7 +194,7 @@ log "Installing debug APK: $APK_PATH"
 install_apk
 
 log "Launching app"
-adb_cmd shell monkey -p "$APP_ID" 1 >/dev/null
+adb_cmd shell am start -W -n "$APP_ACTIVITY" >/dev/null || adb_cmd shell monkey -p "$APP_ID" 1 >/dev/null
 for _ in $(seq 1 150); do
   if grep -q "Android Bundled" "$EXPO_LOG"; then
     break
