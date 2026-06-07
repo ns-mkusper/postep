@@ -56,7 +56,7 @@ Quick entry tailored for Postep workflows.
 ## Navigation Patterns and Gestures
 - Swipe left/right on bottom tabs to move between sections.
 - Two-finger pinch in Library toggles Reader Mode.
-- Swipe down on document to reveal quick actions (share, export, open in desktop).
+- Swipe down on document to reveal quick actions (share, export, open externally).
 - Hold FAB for split capture (text + voice note) saved to Drive as attachments.
 
 ## Lexical Projection Strategy
@@ -71,7 +71,7 @@ Quick entry tailored for Postep workflows.
 - Roam loads graphs from `org_roam::build_roam_graph`, subscribing to deltas when sync completes.
 - Capture funnels edits through the bridge’s patch API (to be implemented) to send modifications back to Rust before Drive upload.
 
-## Deprecations from Legacy UI
-- Remove the legacy two-button `Documents/Agenda` toggle.
+## Navigation Simplifications
+- Replace the two-button `Documents/Agenda` toggle with app-level navigation.
 - Use navigation-aware state machines in the React Native app.
-- Retire the static split pane; use adaptive layout that shows sidebar only on tablets/desktop.
+- Use adaptive layout that keeps phone UI single-column and exposes a sidebar on larger screens.
