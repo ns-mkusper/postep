@@ -1,6 +1,6 @@
-# Android Storage Onboarding Prototype
+# Android Storage Onboarding
 
-This prototype captures the user flow and integration points required to mount an Org directory (and optional Org-roam directory) from Google Drive using Android’s Storage Access Framework (SAF).
+This document captures the user flow and integration points required to mount an Org directory (and optional Org-roam directory) from Google Drive using Android’s Storage Access Framework (SAF).
 
 ## User Flow
 1. **Directory request** – During onboarding we call `requestOrgDirectory` to present the SAF picker scoped to Google Drive. Users can optionally pass a previously granted URI so the picker opens at the right folder.

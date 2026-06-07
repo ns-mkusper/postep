@@ -48,7 +48,7 @@ Create a multi-crate workspace that keeps performance-critical Org logic in Rust
 
 - **`org_domain`**: extends agenda, habit, and document parsing with coverage for drawers, properties, and logbooks so we honour Emacs semantics. It emits `LexicalNode` payloads for the TypeScript bridge.
 - **`org_sync`**: encapsulates filesystem and Google Drive directory syncing with conflict resolution (clock skew, duplicates) and file watchers for continuous sync.
-- **`org_roam`**: parses roam-specific files (`.org-roam`, `roam.db` migrations) to surface backlinks, tags, and graph structure. It exposes APIs for nearest neighbour queries, backlink list, and graph traversal similar to the desktop plugin.
+- **`org_roam`**: parses roam-specific files (`.org-roam`, `roam.db` migrations) to surface backlinks, tags, and graph structure. It exposes APIs for nearest neighbour queries, backlink list, and graph traversal compatible with org-roam-style workflows.
 - **`org_calendar`**: maps Org agenda data to Google Calendar events, handling time zones and recurrence. It produces ICS snapshots and uses incremental sync tokens when pushing to Google Calendar.
 - **`org_search`**: builds inverted indexes for title/body/tags to power quick capture and goal review.
 
@@ -61,7 +61,6 @@ Responsibilities:
 - Load Org directories on startup, hydrating caches into SQLite (via `expo-sqlite`) for offline support.
 - Manage background tasks: periodic Drive `files.list` delta sync using saved page tokens; SAF document change subscriptions; agenda refresh triggers.
 - Provide file pickers: request directories for Org root and Org-roam root; persist `persistedUriPermissions` so Android retains access across app restarts.
-- Serve GraphQL-lite IPC (optional) for desktop/web builds.
 
 ### 3. UI Layer (`apps/mobile`)
 Uses Expo + React Native. Lexical is instantiated for editor state and namespace ownership, while visible Org content is rendered through native React Native components. This avoids DOM-only Lexical React assumptions and keeps Android rendering native.
@@ -109,7 +108,7 @@ During onboarding, the app asks for the Org-roam directory (can be different fro
 6. **QA & Android hardening**: UX performance tests, web E2E, Android emulator screenshots, offline resilience, and release packaging.
 
 ## Migration Notes
-- The legacy desktop shell has been removed; the Expo/React Native Lexical app is the app surface.
+- The Expo/React Native Lexical app is the sole app surface.
 - Provide migration CLI to copy user settings (roots, agendas) into the new configuration files stored as Org drawers or JSON.
 
 ## Risks
