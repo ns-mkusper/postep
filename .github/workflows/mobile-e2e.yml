@@ -11,6 +11,32 @@ permissions:
   actions: read
 
 jobs:
+  storage-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CI: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install mobile dependencies
+        working-directory: apps/mobile
+        run: npm install --legacy-peer-deps
+
+      - name: Typecheck mobile storage paths
+        working-directory: apps/mobile
+        run: npm run typecheck
+
+      - name: Run SAF and agenda storage regressions
+        working-directory: apps/mobile
+        run: npm run test:storage
+
   android-native-build:
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -12,10 +12,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addHabitAsync,
   deleteHabitAsync,
-  loadAgendaSnapshotAsync,
 } from "@postep/bridge";
 import { useBridgeConfig } from "../../store/orgConfig";
 import { useBridgeEvent } from "../../hooks/useBridgeEvent";
+import { loadAgendaSnapshotForConfig } from "../../lib/agendaSources";
 
 export default function HabitsScreen() {
   const config = useBridgeConfig();
@@ -33,7 +33,7 @@ export default function HabitsScreen() {
     queryFn: () =>
       config.roots.length === 0
         ? Promise.resolve({ items: [], habits: [] })
-        : loadAgendaSnapshotAsync(config),
+        : loadAgendaSnapshotForConfig(config),
   });
 
   useBridgeEvent("agendaChanged", () => agendaQuery.refetch());

@@ -4,15 +4,54 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  StatusBar,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { router } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useOrgConfig } from "../../store/orgConfig";
 
+const ANDROID_STATUS_BAR_FALLBACK = 58;
+
+function topSystemInset(insetTop: number): number {
+  if (Platform.OS !== "android") {
+    return insetTop;
+  }
+  return Math.max(
+    insetTop,
+    StatusBar.currentHeight ?? 0,
+    ANDROID_STATUS_BAR_FALLBACK,
+  );
+}
+
+function pickerErrorStatus(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/cancel/i.test(message)) {
+    return "Picker cancelled";
+  }
+  return `Picker failed: ${message}`;
+}
+
+function formatListingWarning(errors: Array<{ message: string }>): string {
+  if (errors.length === 0) {
+    return "";
+  }
+  const first = errors[0]?.message ? `: ${errors[0].message}` : "";
+  return ` · ${errors.length} skipped${first}`;
+}
+
+type FileListingSummary = {
+  kind: "org" | "roam";
+  root: string;
+  names: string[];
+};
+
 export default function SettingsScreen() {
+  const insets = useSafeAreaInsets();
   const roots = useOrgConfig((state) => state.roots);
   const roamRoots = useOrgConfig((state) => state.roamRoots);
   const addRoot = useOrgConfig((state) => state.addRoot);
@@ -22,8 +61,10 @@ export default function SettingsScreen() {
   const [newRoot, setNewRoot] = useState("");
   const [newRoamRoot, setNewRoamRoot] = useState("");
   const [pickerStatus, setPickerStatus] = useState<string | null>(null);
+  const [listingSummaries, setListingSummaries] = useState<FileListingSummary[]>([]);
   const [loadingSource, setLoadingSource] = useState<"org" | "roam" | null>(null);
   const isAndroid = Platform.OS === "android";
+  const contentPaddingTop = topSystemInset(insets.top) + 18;
 
   const handleAddRoot = () => {
     if (!newRoot.trim()) {
@@ -54,10 +95,16 @@ export default function SettingsScreen() {
       setPickerStatus("Loading source…");
       addRoot(handle.uri);
       const listing = await listOrgFilesRecursively(handle.uri);
-      const warning = listing.errors.length > 0 ? ` · ${listing.errors.length} folders skipped` : "";
+      const names = listing.files.map((file) => file.name);
+      console.warn("Postep SAF org files", names);
+      setListingSummaries((summaries) => [
+        { kind: "org", root: handle.uri, names },
+        ...summaries.filter((summary) => summary.kind !== "org"),
+      ]);
+      const warning = formatListingWarning(listing.errors);
       setPickerStatus(`Added source · ${listing.entries.length} org files found${warning}`);
     } catch (error) {
-      setPickerStatus("Picker cancelled or failed");
+      setPickerStatus(pickerErrorStatus(error));
       console.warn("SAF picker failed", error);
     } finally {
       setLoadingSource(null);
@@ -77,22 +124,94 @@ export default function SettingsScreen() {
       setPickerStatus("Loading roam source…");
       addRoamRoot(handle.uri);
       const listing = await listOrgFilesRecursively(handle.uri);
-      const warning = listing.errors.length > 0 ? ` · ${listing.errors.length} folders skipped` : "";
+      const names = listing.files.map((file) => file.name);
+      console.warn("Postep SAF org-roam files", names);
+      setListingSummaries((summaries) => [
+        { kind: "roam", root: handle.uri, names },
+        ...summaries.filter((summary) => summary.kind !== "roam"),
+      ]);
+      const warning = formatListingWarning(listing.errors);
       setPickerStatus(`Added roam source · ${listing.entries.length} org files found${warning}`);
     } catch (error) {
-      setPickerStatus("Picker cancelled or failed");
+      setPickerStatus(pickerErrorStatus(error));
       console.warn("SAF picker failed", error);
     } finally {
       setLoadingSource(null);
     }
   };
 
+  const handleVerifyRoots = async () => {
+    if (!isAndroid || loadingSource) {
+      return;
+    }
+    const configuredRoots: Array<{ kind: "org" | "roam"; root: string }> = [
+      ...roots.map((root) => ({ kind: "org" as const, root })),
+      ...roamRoots.map((root) => ({ kind: "roam" as const, root })),
+    ].filter((configured) => configured.root.startsWith("content://"));
+    if (configuredRoots.length === 0) {
+      setPickerStatus("No configured Android SAF folders to verify.");
+      setListingSummaries([]);
+      return;
+    }
+    setLoadingSource("org");
+    setPickerStatus("Verifying configured folders…");
+    try {
+      const { listOrgFilesRecursively } =
+        await import("@postep/bridge/platform/android/saf");
+      const summaries: FileListingSummary[] = [];
+      for (const configured of configuredRoots) {
+        const listing = await listOrgFilesRecursively(configured.root);
+        const names = listing.files.map((file) => file.name);
+        console.warn(
+          configured.kind === "org"
+            ? "Postep SAF org files"
+            : "Postep SAF org-roam files",
+          names,
+        );
+        summaries.push({ kind: configured.kind, root: configured.root, names });
+      }
+      setListingSummaries(summaries);
+      const total = summaries.reduce((sum, summary) => sum + summary.names.length, 0);
+      setPickerStatus(`Verified ${configuredRoots.length} folders · ${total} org files found`);
+    } catch (error) {
+      setPickerStatus(`Verification failed: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn("SAF verification failed", error);
+    } finally {
+      setLoadingSource(null);
+    }
+  };
+
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      testID="settings-screen"
+    <View
+      style={[
+        styles.container,
+        { paddingLeft: insets.left, paddingRight: insets.right },
+      ]}
     >
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.content, { paddingTop: contentPaddingTop }]}
+        testID="settings-screen"
+      >
+      <View style={styles.navBar}>
+        <TouchableOpacity
+          style={styles.navButton}
+          onPress={() => router.replace("/library")}
+          testID="settings-back-to-library"
+          accessibilityLabel="Back to notes"
+        >
+          <Text style={styles.navIcon}>‹</Text>
+          <Text style={styles.navText}>Notes</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.navButton}
+          onPress={() => router.replace("/")}
+          testID="settings-home"
+          accessibilityLabel="Go to home"
+        >
+          <Text style={styles.navText}>Home</Text>
+        </TouchableOpacity>
+      </View>
       <Text style={styles.title}>Org settings</Text>
       <Text style={styles.description}>
         Choose the local folders Postep should parse for notes, agenda items,
@@ -187,13 +306,68 @@ export default function SettingsScreen() {
         </TouchableOpacity>
       )}
       {pickerStatus && <Text style={styles.pickerStatus}>{pickerStatus}</Text>}
-    </ScrollView>
+      {isAndroid && (
+        <TouchableOpacity
+          style={[styles.verifyButton, loadingSource && styles.disabledButton]}
+          onPress={handleVerifyRoots}
+          disabled={Boolean(loadingSource)}
+        >
+          <Text style={styles.pickerText}>Verify Configured Folders</Text>
+        </TouchableOpacity>
+      )}
+      {listingSummaries.map((summary) => (
+        <View key={summary.kind} style={styles.fileListPanel}>
+          <Text style={styles.fileListTitle}>
+            {summary.kind === "org" ? "Org files" : "Org-roam files"} · {summary.names.length}
+          </Text>
+          <Text style={styles.fileListRoot} numberOfLines={2}>
+            {summary.root}
+          </Text>
+          {summary.names.map((name) => (
+            <Text key={`${summary.kind}:${name}`} style={styles.fileListItem}>
+              {name}
+            </Text>
+          ))}
+        </View>
+      ))}
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#071008" },
+  scroll: { flex: 1 },
   content: { padding: 18, paddingBottom: 48 },
+  navBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  navButton: {
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: "#111A10",
+    borderWidth: 1,
+    borderColor: "#303B2D",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  navIcon: {
+    color: "#F2F5EC",
+    fontSize: 28,
+    lineHeight: 30,
+    fontWeight: "800",
+    marginRight: 4,
+  },
+  navText: {
+    color: "#F2F5EC",
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: "800",
+  },
   title: {
     color: "#F2F5EC",
     fontSize: 32,
@@ -285,5 +459,40 @@ const styles = StyleSheet.create({
     color: "#9BA394",
     fontSize: 16,
     lineHeight: 22,
+  },
+  verifyButton: {
+    marginTop: 12,
+    backgroundColor: "#182116",
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#3D4638",
+  },
+  fileListPanel: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: "#303B2D",
+    backgroundColor: "#0B130A",
+    borderRadius: 8,
+    padding: 12,
+  },
+  fileListTitle: {
+    color: "#F2F5EC",
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  fileListRoot: {
+    color: "#7F8878",
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 8,
+  },
+  fileListItem: {
+    color: "#B9C0B2",
+    fontSize: 13,
+    lineHeight: 18,
   },
 });

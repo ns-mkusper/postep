@@ -39,6 +39,8 @@ docs/
 2. **Node/Expo toolchain**: run `npm install --legacy-peer-deps` inside `apps/mobile`.
 3. **Mobile checks**: from `apps/mobile`, run `npm run typecheck`, `npm run test:ux`, `npm run e2e:web:build`, and `npm run e2e:web`.
 4. **Android smoke build**: from `apps/mobile`, run `npm run e2e:android:prebuild` and `npm run e2e:android:build`.
+5. **Android standalone APK**: from `apps/mobile`, run `npm run android:standalone:prebuild`, `npm run android:standalone:build`, and `npm run android:standalone:install`. This installs a bundled APK that does not require Metro; debug/e2e APKs are Metro-dependent and can show a blank screen if launched without the dev server.
+6. **Desktop prototype**: `cargo run -p org_app` still launches the legacy egui app for testing Org parsing changes.
 
 ## Configuring Org Directories
 

@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
+  Modal,
+  Pressable,
   Text,
   StyleSheet,
   TouchableOpacity,
@@ -9,11 +11,13 @@ import {
   ActivityIndicator,
   ScrollView,
   TextInput,
+  Platform,
+  StatusBar,
   useWindowDimensions,
   type GestureResponderEvent,
 } from "react-native";
-import { DrawerActions } from "@react-navigation/native";
-import { router, useNavigation } from "expo-router";
+import { router } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -70,6 +74,84 @@ type ChecklistItem = {
   checked: boolean;
   lineStart: number;
 };
+
+const PREVIEW_LOAD_CONCURRENCY = 4;
+const PREVIEW_LOAD_LIMIT = 24;
+const PREVIEW_LOAD_TIMEOUT_MS = 5000;
+const ANDROID_STATUS_BAR_FALLBACK = 58;
+
+function topSystemInset(insetTop: number): number {
+  if (Platform.OS !== "android") {
+    return insetTop;
+  }
+  return Math.max(
+    insetTop,
+    StatusBar.currentHeight ?? 0,
+    ANDROID_STATUS_BAR_FALLBACK,
+  );
+}
+
+async function mapConcurrent<T, R>(
+  items: T[],
+  limit: number,
+  task: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(limit, items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await task(items[index], index);
+      }
+    }),
+  );
+
+  return results;
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(
+      () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  });
+}
+
+async function loadPreviewOrSkip(
+  bridgeConfig: ReturnType<typeof useBridgeConfig>,
+  doc: DocumentRef,
+): Promise<NotePreview | null> {
+  try {
+    const payload = await withTimeout(
+      loadDocumentForConfig(bridgeConfig, doc.path),
+      PREVIEW_LOAD_TIMEOUT_MS,
+      doc.name,
+    );
+    return buildPreview(doc, payload);
+  } catch (error) {
+    console.warn("Postep preview load skipped", {
+      name: doc.name,
+      path: doc.path,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
 
 function cleanOrgText(text: string) {
   return text
@@ -248,6 +330,20 @@ function buildPreview(doc: DocumentRef, payload: DocumentPayload): NotePreview {
       metadata.scheduled?.slice(0, 10) ??
       metadata.deadline?.slice(0, 10) ??
       null,
+  };
+}
+
+function buildFallbackPreview(doc: DocumentRef): NotePreview {
+  return {
+    doc,
+    title: doc.name.replace(/\.org$/i, ""),
+    lines: [],
+    checkedCount: 0,
+    tags: [],
+    metadata: {
+      properties: [],
+    },
+    primaryDate: null,
   };
 }
 
@@ -471,9 +567,10 @@ function toggleRawCheckbox(raw: string, lineStart: number): string {
 }
 
 export default function LibraryScreen() {
-  const navigation = useNavigation();
   const queryClient = useQueryClient();
   const bridgeConfig = useBridgeConfig();
+  const insets = useSafeAreaInsets();
+  const headerPaddingTop = topSystemInset(insets.top) + 8;
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [readerMode, setReaderMode] = useState(false);
   const [outlineOnly, setOutlineOnly] = useState(false);
@@ -483,11 +580,14 @@ export default function LibraryScreen() {
   const [newChecklistText, setNewChecklistText] = useState("");
   const [showCheckedItems, setShowCheckedItems] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
   const [interactionStatus, setInteractionStatus] = useState<string | null>(
     null,
   );
   const { width } = useWindowDimensions();
   const numColumns = width >= 360 ? 2 : 1;
+  const hasConfiguredRoots =
+    bridgeConfig.roots.length > 0 || (bridgeConfig.roamRoots?.length ?? 0) > 0;
 
   const documentsQuery = useQuery({
     queryKey: [
@@ -516,15 +616,17 @@ export default function LibraryScreen() {
       bridgeConfig.roots.join(":"),
       bridgeConfig.roamRoots?.join(":") ?? "",
     ],
-    enabled: Boolean(documentsQuery.data) && bridgeConfig.roots.length > 0,
+    enabled: Boolean(documentsQuery.data) && hasConfiguredRoots,
     queryFn: () =>
       measureAsyncInteraction("noteGrid", async () => {
-        const documents = documentsQuery.data ?? [];
-        const payloads = await Promise.all(
-          documents.map((doc) => loadDocumentForConfig(bridgeConfig, doc.path)),
+        const documents = (documentsQuery.data ?? []).slice(0, PREVIEW_LOAD_LIMIT);
+        const previews = await mapConcurrent(
+          documents,
+          PREVIEW_LOAD_CONCURRENCY,
+          (doc) => loadPreviewOrSkip(bridgeConfig, doc),
         );
-        return documents
-          .map((doc, index) => buildPreview(doc, payloads[index]))
+        return previews
+          .filter((preview): preview is NotePreview => preview !== null)
           .sort((left, right) =>
             (left.primaryDate ?? "9999-12-31").localeCompare(
               right.primaryDate ?? "9999-12-31",
@@ -533,10 +635,26 @@ export default function LibraryScreen() {
       }),
   });
 
-  const noteGrid = previewsQuery.data ?? {
-    value: [] as NotePreview[],
-    metric: { elapsedMs: 0 },
-  };
+  const previewByPath = useMemo(
+    () =>
+      new Map(
+        (previewsQuery.data?.value ?? []).map((preview) => [
+          preview.doc.path,
+          preview,
+        ]),
+      ),
+    [previewsQuery.data?.value],
+  );
+
+  const noteGrid = useMemo(
+    () => ({
+      value: (documentsQuery.data ?? []).map(
+        (doc) => previewByPath.get(doc.path) ?? buildFallbackPreview(doc),
+      ),
+      metric: previewsQuery.data?.metric ?? { elapsedMs: 0 },
+    }),
+    [documentsQuery.data, previewByPath, previewsQuery.data?.metric],
+  );
 
   const visibleNotes = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -563,7 +681,7 @@ export default function LibraryScreen() {
       bridgeConfig.roots.join(":"),
       bridgeConfig.roamRoots?.join(":") ?? "",
     ],
-    enabled: Boolean(selectedPath) && bridgeConfig.roots.length > 0,
+    enabled: Boolean(selectedPath) && hasConfiguredRoots,
     queryFn: () => loadDocumentForConfig(bridgeConfig, selectedPath!),
   });
 
@@ -631,7 +749,7 @@ export default function LibraryScreen() {
   useBridgeEvent("rootsChanged", onRefreshDocuments);
 
   const persistRaw = async (raw: string, label: string) => {
-    if (!selectedPath || bridgeConfig.roots.length === 0) {
+    if (!selectedPath || !hasConfiguredRoots) {
       return;
     }
     const path = selectedPath;
@@ -690,10 +808,17 @@ export default function LibraryScreen() {
     }
   };
 
-  const openDrawer = () => navigation.dispatch(DrawerActions.openDrawer());
+  const openAppMenu = () => setIsAppMenuOpen(true);
+  const closeAppMenu = () => setIsAppMenuOpen(false);
+  const navigateFromMenu = (
+    href: "/library" | "/agenda" | "/roam" | "/habits" | "/settings",
+  ) => {
+    setIsAppMenuOpen(false);
+    router.push(href);
+  };
 
   const toggleChecklistItem = async (path: string, lineStart?: number) => {
-    if (lineStart === undefined || bridgeConfig.roots.length === 0) {
+    if (lineStart === undefined || !hasConfiguredRoots) {
       return;
     }
     const payload = await loadDocumentForConfig(bridgeConfig, path);
@@ -989,13 +1114,91 @@ export default function LibraryScreen() {
     </View>
   );
 
+  const drawerWidth = Math.min(width * 0.84, 360);
+
   return (
-    <View style={styles.container} testID="documents-screen">
-      <View style={styles.postepHeader}>
+    <View
+      style={[
+        styles.container,
+        { paddingLeft: insets.left, paddingRight: insets.right },
+      ]}
+      testID="documents-screen"
+    >
+      <Modal
+        visible={isAppMenuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={closeAppMenu}
+        testID="navigation-drawer"
+      >
+        <View style={styles.drawerLayer}>
+          <Pressable
+            style={styles.drawerScrim}
+            onPress={closeAppMenu}
+            testID="navigation-drawer-scrim"
+          />
+          <View
+            style={[
+              styles.navDrawer,
+              { paddingTop: headerPaddingTop, width: drawerWidth },
+            ]}
+          >
+            <View style={styles.drawerHeader}>
+              <Text style={styles.drawerTitle}>Postep</Text>
+              <TouchableOpacity
+                onPress={closeAppMenu}
+                style={styles.drawerCloseButton}
+                testID="navigation-drawer-close"
+                accessibilityLabel="Close navigation drawer"
+              >
+                <Text style={styles.drawerCloseText}>×</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={styles.drawerItem}
+              onPress={() => navigateFromMenu("/library")}
+              testID="drawer-item-notes"
+            >
+              <Text style={styles.drawerItemText}>📝 Notes</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.drawerItem}
+              onPress={() => navigateFromMenu("/agenda")}
+              testID="drawer-item-agenda"
+            >
+              <Text style={styles.drawerItemText}>📅 Agenda</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.drawerItem}
+              onPress={() => navigateFromMenu("/roam")}
+              testID="drawer-item-roam"
+            >
+              <Text style={styles.drawerItemText}>🕸 Org-roam</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.drawerItem}
+              onPress={() => navigateFromMenu("/habits")}
+              testID="drawer-item-habits"
+            >
+              <Text style={styles.drawerItemText}>🔁 Habits</Text>
+            </TouchableOpacity>
+            <View style={styles.drawerDivider} />
+            <TouchableOpacity
+              style={styles.drawerItem}
+              onPress={() => navigateFromMenu("/settings")}
+              testID="drawer-item-settings"
+            >
+              <Text style={styles.drawerItemText}>⚙ Settings</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+      <View style={[styles.postepHeader, { paddingTop: headerPaddingTop }]}>
         <TouchableOpacity
           testID="hamburger-menu"
-          onPress={openDrawer}
+          onPress={openAppMenu}
           style={styles.iconButton}
+          accessibilityLabel="Open app menu"
         >
           <Text style={styles.menuIcon}>☰</Text>
         </TouchableOpacity>
@@ -1065,7 +1268,7 @@ export default function LibraryScreen() {
             refreshing={documentsQuery.isFetching || previewsQuery.isFetching}
             onRefresh={onRefreshDocuments}
             ListHeaderComponent={() =>
-              bridgeConfig.roots.length > 0 &&
+              hasConfiguredRoots &&
               (documentsQuery.isFetching || previewsQuery.isFetching) ? (
                 <View style={styles.loadingSourceBanner}>
                   <ActivityIndicator color="#AFC0FF" />
@@ -1075,11 +1278,14 @@ export default function LibraryScreen() {
             }
             ListEmptyComponent={() => (
               <View style={styles.emptyDocs}>
-                <Text style={styles.emptyDocsText}>
-                  {searchQuery.trim()
-                    ? "No notes match that search."
-                    : "Add an Org root from the menu to see notes."}
-                </Text>
+                {hasConfiguredRoots &&
+                (documentsQuery.isFetching || previewsQuery.isFetching) ? null : (
+                  <Text style={styles.emptyDocsText}>
+                    {searchQuery.trim()
+                      ? "No notes match that search."
+                      : "Add an Org root from the menu to see notes."}
+                  </Text>
+                )}
               </View>
             )}
             renderItem={renderNoteCard}
@@ -1237,6 +1443,74 @@ export default function LibraryScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#071008" },
+  drawerLayer: {
+    flex: 1,
+    flexDirection: "row",
+  },
+  drawerScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.42)",
+  },
+  navDrawer: {
+    height: "100%",
+    backgroundColor: "#071008",
+    borderRightWidth: 1,
+    borderRightColor: "#303B2D",
+    paddingHorizontal: 14,
+    paddingBottom: 18,
+    shadowColor: "#000000",
+    shadowOpacity: 0.34,
+    shadowRadius: 18,
+    elevation: 12,
+  },
+  drawerHeader: {
+    minHeight: 54,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  drawerTitle: {
+    color: "#F2F5EC",
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: "900",
+  },
+  drawerCloseButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#111A10",
+    borderWidth: 1,
+    borderColor: "#303B2D",
+  },
+  drawerCloseText: {
+    color: "#F2F5EC",
+    fontSize: 26,
+    lineHeight: 30,
+    fontWeight: "800",
+  },
+  drawerItem: {
+    minHeight: 50,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    marginBottom: 6,
+    alignItems: "flex-start",
+    justifyContent: "center",
+  },
+  drawerItemText: {
+    color: "#E4EADF",
+    fontSize: 17,
+    lineHeight: 24,
+    fontWeight: "800",
+  },
+  drawerDivider: {
+    height: 1,
+    backgroundColor: "#303B2D",
+    marginVertical: 8,
+  },
   postepHeader: {
     paddingTop: 8,
     paddingHorizontal: 14,
