@@ -40,11 +40,12 @@ Combines a reader-focused layout with interactive streak tracking.
 - **Completion gestures**: swipe right to check off today, triggering `org_sync` updates and calendar reminders if applicable.
 
 ## Roam
-Brings org-roam graph insights into mobile-friendly views.
+Brings org-roam graph insights into mobile-friendly views. See `docs/org-roam-frontend-plan.md` for the phased implementation plan tied to issue #13.
 
-- **Graph explorer**: simplified force-directed view (Canvas via React Native Skia) with tappable nodes. Selecting a node opens a Lexical-backed detail pane showing note excerpt, tags, and backlinks.
+- **Mobile graph overview**: stacked cards summarize note, link, tag, isolated-node, and density signals before introducing heavier visual graph rendering.
+- **Relationship explorer**: selected-note cards expose backlinks, forward links, related notes, tags, and excerpts while preserving navigation context.
 - **Daily notes lane**: horizontally scrollable list of daily files (YYYY-MM-DD.org) with quick capture.
-- **Query builder**: filter nodes by tag, TODO state, or date created using pills.
+- **Query builder**: filter nodes by tag, TODO state, title/path search, relationship state, or date using pills.
 
 ## Capture
 Quick entry tailored for Postep workflows.
