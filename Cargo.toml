@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/org_core",
-    "crates/org_app",
     "crates/org_bridge",
     "crates/org_domain",
     "crates/org_sync",

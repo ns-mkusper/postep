@@ -17,14 +17,13 @@ The detailed architecture blueprint lives in [`docs/architecture.md`](docs/archi
 3. **Lexical UI** (`apps/mobile`, WIP): An Expo (React Native) application that uses Lexical for editor state and a native React Native projection for rendered Org blocks. Screens include Library, Agenda, Habits, Roam, and Capture.
 
 ## Current Repo Layout
-This repository is migrating from an `egui` prototype to the Lexical/React Native architecture. The existing crates remain buildable while the mobile UI and bridge are being staged.
+This repository now uses the Lexical/React Native architecture for the app surface while the Rust crates provide Org parsing, agenda, sync, and bridge payloads.
 
 ```
 crates/
   org_domain     # Org parsing, agenda, habit, and Lexical document projection
   org_bridge     # Native bridge payloads for the TypeScript app
-  org_core       # Legacy core logic retained during migration
-  org_app        # Legacy egui shell kept for desktop testing during migration
+  org_core       # Core Org data structures and shared logic
 apps/
   mobile         # Expo React Native app with Lexical-backed Org UI
 packages/
@@ -40,7 +39,6 @@ docs/
 2. **Node/Expo toolchain**: run `npm install --legacy-peer-deps` inside `apps/mobile`.
 3. **Mobile checks**: from `apps/mobile`, run `npm run typecheck`, `npm run test:ux`, `npm run e2e:web:build`, and `npm run e2e:web`.
 4. **Android smoke build**: from `apps/mobile`, run `npm run e2e:android:prebuild` and `npm run e2e:android:build`.
-5. **Desktop prototype**: `cargo run -p org_app` still launches the legacy egui app for testing Org parsing changes.
 
 ## Configuring Org Directories
 
@@ -48,10 +46,6 @@ docs/
 - Launch the app and open the **Library** tab. The root manager at the top lets you paste filesystem paths or, on Android, tap **Pick via Android SAF** to grant access to a Google Drive or local directory.
 - Add your main Org directory under “Org Roots” and (optionally) your Org-roam vault under “Org-roam Roots”. The selections are passed to the Rust bridge, registered with `OrgSyncService`, and synced across the Agenda, Habits, Roam, and Capture screens automatically.
 - You can remove roots at any time; the bridge will stop watching them and the UI will refresh to match.
-
-### Legacy egui prototype
-- Set environment variables before launching: `ORG_ROOT=/path/to/org cargo run -p org_app`.
-- For multiple directories use `ORG_ROOTS`, e.g. `ORG_ROOTS="/path/to/org:/path/to/projects" cargo run -p org_app` (use `;` on Windows).
 
 ### Sample data
 - Integration tests now generate synthetic Org data on the fly (see `crates/org_domain/tests/`). Use your own directories in development; the repository does not ship personal Org content.
