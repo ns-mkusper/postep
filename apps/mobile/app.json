@@ -12,11 +12,13 @@
       "typedRoutes": true
     },
     "android": {
-      "package": "com.postep.mobile"
+      "package": "com.postep.mobile",
+      "versionCode": 7
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      "./plugins/withPostepContentUri"
     ]
   }
 }

@@ -106,6 +106,10 @@ jobs:
         working-directory: apps/mobile
         run: npm run test:ux
 
+      - name: Run SAF and agenda storage regressions
+        working-directory: apps/mobile
+        run: npm run test:storage
+
       - name: Generate Android native project
         working-directory: apps/mobile
         run: npx expo prebuild --platform android --clean

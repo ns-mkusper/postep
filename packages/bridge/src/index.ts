@@ -286,7 +286,11 @@ function resolveNativeBinding(): NativeModule {
     return cachedBinding;
   }
 
-  const requireNative = eval("require") as NodeRequire;
+  const requireNative = getNodeRequire();
+  if (!requireNative) {
+    cachedBinding = noNativeModule;
+    return cachedBinding;
+  }
   const { existsSync } = requireNative("node:fs") as typeof import("node:fs");
   const { join } = requireNative("node:path") as typeof import("node:path");
   const cwd =
@@ -313,6 +317,15 @@ function resolveNativeBinding(): NativeModule {
   throw new Error(
     "Unable to locate org_bridge native module. Run `cargo build -p org_bridge` or copy the binary into packages/bridge/native/index.node.",
   );
+}
+
+function getNodeRequire(): NodeRequire | null {
+  try {
+    const requireNative = eval("require") as unknown;
+    return typeof requireNative === "function" ? (requireNative as NodeRequire) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function ping(): string {
@@ -874,6 +887,19 @@ const e2eNativeModule: NativeModule = {
     setE2EHeadlineStatus(path, headline_line, status);
     return buildE2EAgendaSnapshot();
   },
+};
+
+const noNativeModule: NativeModule = {
+  ping: () => "postep-org-bridge-unavailable",
+  load_agenda_snapshot: () => ({ items: [], habits: [] }),
+  complete_agenda_item: () => ({ items: [], habits: [] }),
+  append_capture_entry: () => ({ items: [], habits: [] }),
+  load_roam_graph: () => ({ nodes: [], links: [] }),
+  list_documents: () => [],
+  load_document: (_config, path) => ({ path, raw: "", lexical: [] }),
+  update_document: ({ path, raw }) => ({ path, raw, lexical: rawToLexical(raw) }),
+  set_roots: () => {},
+  set_agenda_status: () => ({ items: [], habits: [] }),
 };
 
 function loadE2EDocument(path: string): DocumentPayload {

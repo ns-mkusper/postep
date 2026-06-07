@@ -9,6 +9,8 @@ import {
   type UpdateDocumentRequest,
 } from "@postep/bridge";
 
+const LISTING_TARGET_MS = 10000;
+
 export function isSafUri(uri: string): boolean {
   return uri.startsWith("content://");
 }
@@ -16,10 +18,12 @@ export function isSafUri(uri: string): boolean {
 function splitConfig(config: OrgBridgeConfig): {
   nativeConfig: OrgBridgeConfig;
   safRoots: string[];
+  safRoamRoots: string[];
 } {
   const nativeRoots = config.roots.filter((root) => !isSafUri(root));
   const safRoots = config.roots.filter(isSafUri);
   const nativeRoamRoots = config.roamRoots?.filter((root) => !isSafUri(root));
+  const safRoamRoots = config.roamRoots?.filter(isSafUri) ?? [];
   return {
     nativeConfig: {
       roots: nativeRoots,
@@ -28,38 +32,55 @@ function splitConfig(config: OrgBridgeConfig): {
         : {}),
     },
     safRoots,
+    safRoamRoots,
   };
 }
 
 export async function listDocumentsForConfig(
   config: OrgBridgeConfig,
 ): Promise<DocumentRef[]> {
-  if (config.roots.length === 0) {
+  const startedAt = Date.now();
+  if (config.roots.length === 0 && (config.roamRoots?.length ?? 0) === 0) {
     return [];
   }
 
-  const { nativeConfig, safRoots } = splitConfig(config);
+  const { nativeConfig, safRoots, safRoamRoots } = splitConfig(config);
   const documents: DocumentRef[] = [];
 
-  if (nativeConfig.roots.length > 0) {
+  if (nativeConfig.roots.length > 0 || (nativeConfig.roamRoots?.length ?? 0) > 0) {
     documents.push(...(await listDocumentsAsync(nativeConfig)));
   }
 
-  if (safRoots.length > 0) {
-    const { listOrgFilesRecursively, nameFromSafUri } =
+  const safDocumentRoots = [...safRoots, ...safRoamRoots];
+  if (safDocumentRoots.length > 0) {
+    const { listOrgFilesRecursively } =
       await import("@postep/bridge/platform/android/saf");
-    for (const root of safRoots) {
+    for (const root of safDocumentRoots) {
+      const rootStartedAt = Date.now();
       const listing = await listOrgFilesRecursively(root);
+      const elapsedMs = Date.now() - rootStartedAt;
+      const level = elapsedMs > LISTING_TARGET_MS ? "warn" : "log";
+      console[level]("Postep SAF listing", {
+        root,
+        files: listing.files.length,
+        errors: listing.errors.length,
+        elapsedMs,
+      });
       documents.push(
-        ...listing.entries.map((path) => ({
-          path,
-          name: nameFromSafUri(path),
+        ...listing.files.map((file) => ({
+          path: file.uri,
+          name: file.name,
         })),
       );
     }
   }
 
-  return documents.sort((left, right) => left.name.localeCompare(right.name));
+  const sorted = documents.sort((left, right) => left.name.localeCompare(right.name));
+  console.log("Postep document listing", {
+    files: sorted.length,
+    elapsedMs: Date.now() - startedAt,
+  });
+  return sorted;
 }
 
 export async function loadDocumentForConfig(

@@ -11,13 +11,13 @@ import {
 } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import {
-  loadAgendaSnapshotAsync,
-  setAgendaStatusAsync,
-  type AgendaItem,
-} from "@postep/bridge";
-import { useBridgeConfig } from "../../store/orgConfig";
+import { type AgendaItem } from "@postep/bridge";
+import { useBridgeConfig, useOrgConfig } from "../../store/orgConfig";
 import { useBridgeEvent } from "../../hooks/useBridgeEvent";
+import {
+  loadAgendaSnapshotForConfig,
+  setAgendaStatusForConfig,
+} from "../../lib/agendaSources";
 
 const STATUS_OPTIONS: Array<{ label: string; value: string }> = [
   { label: "TODO (t)", value: "TODO" },
@@ -202,6 +202,7 @@ function formatScheduleLabel(item: AgendaItem) {
 export default function AgendaScreen() {
   const queryClient = useQueryClient();
   const config = useBridgeConfig();
+  const hasHydratedConfig = useOrgConfig((state) => state.hasHydrated);
   const [pickerItem, setPickerItem] = useState<AgendaItem | null>(null);
 
   const agendaQuery = useQuery({
@@ -211,9 +212,10 @@ export default function AgendaScreen() {
       config.roamRoots?.join(":") ?? "",
     ],
     queryFn: () =>
-      config.roots.length === 0
+      config.roots.length === 0 && (config.roamRoots?.length ?? 0) === 0
         ? Promise.resolve({ items: [], habits: [] })
-        : loadAgendaSnapshotAsync(config),
+        : loadAgendaSnapshotForConfig(config),
+    enabled: hasHydratedConfig,
   });
 
   useBridgeEvent("agendaChanged", () => agendaQuery.refetch());
@@ -229,13 +231,7 @@ export default function AgendaScreen() {
       return;
     }
     try {
-      const snapshot = await setAgendaStatusAsync({
-        roots: config.roots,
-        roamRoots: config.roamRoots,
-        path: item.path,
-        headlineLine: item.headline_line,
-        status,
-      });
+      const snapshot = await setAgendaStatusForConfig(config, item, status);
       queryClient.setQueryData(
         ["agenda", config.roots.join(":"), config.roamRoots?.join(":") ?? ""],
         snapshot,
@@ -334,7 +330,9 @@ export default function AgendaScreen() {
         ListEmptyComponent={() => (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>
-              No agenda items. Add scheduled TODOs in your Org files.
+              {!hasHydratedConfig || agendaQuery.isPending || agendaQuery.isFetching
+                ? "Loading agenda from your Org files..."
+                : "No agenda items. Add scheduled TODOs in your Org files."}
             </Text>
           </View>
         )}

@@ -7,6 +7,11 @@ export interface SafDirectoryListing extends SafDirectoryHandle {
   entries: string[];
 }
 
+export interface SafOrgFileEntry {
+  uri: string;
+  name: string;
+}
+
 export interface SafWriteResult {
   uri: string;
   bytesWritten: number;
@@ -14,6 +19,7 @@ export interface SafWriteResult {
 
 export interface SafRecursiveListing extends SafDirectoryHandle {
   entries: string[];
+  files: SafOrgFileEntry[];
   errors: Array<{ uri: string; message: string }>;
 }
 
@@ -22,17 +28,24 @@ async function loadSafModule() {
   return StorageAccessFramework as SafModule;
 }
 
-async function loadFileSystemModule() {
-  return import('expo-file-system');
-}
-
 type SafModule = {
   requestDirectoryPermissionsAsync: (
     initialUri?: string
   ) => Promise<{ granted: boolean; directoryUri?: string | null }>;
-  persistPermissionsAsync: (uri: string) => Promise<void>;
   readDirectoryAsync: (uri: string) => Promise<string[]>;
   writeAsStringAsync: (uri: string, data: string) => Promise<void>;
+};
+
+type ContentUriModule = {
+  readAsString: (uri: string) => Promise<string>;
+  writeAsString: (uri: string, contents: string) => Promise<void>;
+  listOrgFilesRecursively?: (
+    uri: string,
+    maxDepth: number
+  ) => Promise<{
+    entries: Array<string | SafOrgFileEntry>;
+    errors: Array<{ uri: string; message: string }>;
+  }>;
 };
 
 export async function requestOrgDirectory(initialUri?: string): Promise<SafDirectoryHandle> {
@@ -41,7 +54,6 @@ export async function requestOrgDirectory(initialUri?: string): Promise<SafDirec
   if (!result.granted || !result.directoryUri) {
     throw new Error('User cancelled SAF directory picker');
   }
-  await saf.persistPermissionsAsync(result.directoryUri);
   return { uri: result.directoryUri, persistable: true };
 }
 
@@ -55,6 +67,19 @@ export async function listOrgFilesRecursively(
   uri: string,
   maxDepth = 8
 ): Promise<SafRecursiveListing> {
+  const contentUri = getContentUriModule();
+  if (isGenericContentUri(uri) && contentUri?.listOrgFilesRecursively) {
+    const listing = await contentUri.listOrgFilesRecursively(uri, maxDepth);
+    const files = normalizeSafEntries(listing.entries);
+    return {
+      uri,
+      persistable: true,
+      entries: files.map((file) => file.uri),
+      files,
+      errors: listing.errors,
+    };
+  }
+
   const saf = await loadSafModule();
   const entries: string[] = [];
   const errors: SafRecursiveListing['errors'] = [];
@@ -66,6 +91,10 @@ export async function listOrgFilesRecursively(
     }
     seen.add(currentUri);
 
+    if (shouldIgnoreSafName(nameFromSafUri(currentUri))) {
+      return;
+    }
+
     if (isOrgFileUri(currentUri)) {
       entries.push(currentUri);
       return;
@@ -75,11 +104,17 @@ export async function listOrgFilesRecursively(
     try {
       children = await saf.readDirectoryAsync(currentUri);
     } catch (error) {
-      errors.push({ uri: currentUri, message: errorMessage(error) });
+      if (!looksLikeSkippableFile(currentUri)) {
+        errors.push({ uri: currentUri, message: errorMessage(error) });
+      }
       return;
     }
 
     for (const child of children) {
+      const childName = nameFromSafUri(child);
+      if (shouldIgnoreSafName(childName)) {
+        continue;
+      }
       if (isOrgFileUri(child)) {
         entries.push(child);
       } else {
@@ -89,26 +124,38 @@ export async function listOrgFilesRecursively(
   }
 
   await visit(uri, 0);
+  const files = normalizeSafEntries(entries);
   return {
     uri,
     persistable: true,
-    entries: [...new Set(entries)].sort((left, right) =>
-      nameFromSafUri(left).localeCompare(nameFromSafUri(right))
-    ),
+    entries: files.map((file) => file.uri),
+    files,
     errors,
   };
 }
 
 export async function readOrgFile(uri: string): Promise<string> {
-  const fileSystem = await loadFileSystemModule();
+  const contentUri = getContentUriModule();
+  if (isGenericContentUri(uri) && contentUri) {
+    return contentUri.readAsString(uri);
+  }
+  if (isGenericContentUri(uri)) {
+    throw new Error('Native content URI reader is unavailable');
+  }
+  const fileSystem = await import('expo-file-system');
   return fileSystem.readAsStringAsync(uri, {
     encoding: fileSystem.EncodingType.UTF8,
   });
 }
 
 export async function writeOrgFile(uri: string, contents: string): Promise<SafWriteResult> {
-  const saf = await loadSafModule();
-  await saf.writeAsStringAsync(uri, contents);
+  const contentUri = getContentUriModule();
+  if (isGenericContentUri(uri) && contentUri) {
+    await contentUri.writeAsString(uri, contents);
+  } else {
+    const saf = await loadSafModule();
+    await saf.writeAsStringAsync(uri, contents);
+  }
   return { uri, bytesWritten: utf8Length(contents) };
 }
 
@@ -124,8 +171,59 @@ export function nameFromSafUri(uri: string): string {
   return (slashName ?? colonName ?? tail).replace(/^.*\//, '') || uri;
 }
 
+function normalizeSafEntries(entries: Array<string | SafOrgFileEntry>): SafOrgFileEntry[] {
+  const byUri = new Map<string, SafOrgFileEntry>();
+  for (const entry of entries) {
+    const file = typeof entry === 'string'
+      ? { uri: entry, name: nameFromSafUri(entry) }
+      : { uri: entry.uri, name: entry.name || nameFromSafUri(entry.uri) };
+    if (!isOrgFileName(file.name) || shouldIgnoreSafName(file.name)) {
+      continue;
+    }
+    if (!byUri.has(file.uri)) {
+      byUri.set(file.uri, file);
+    }
+  }
+  return [...byUri.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
 function isOrgFileUri(uri: string): boolean {
-  return nameFromSafUri(uri).toLowerCase().endsWith('.org');
+  return isOrgFileName(nameFromSafUri(uri));
+}
+
+function isOrgFileName(name: string): boolean {
+  return name.toLowerCase().endsWith('.org');
+}
+
+function shouldIgnoreSafName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return name.startsWith('.#') ||
+    (name.startsWith('#') && name.endsWith('#')) ||
+    lower.endsWith('~') ||
+    lower.endsWith('.bak') ||
+    lower.endsWith('.tmp') ||
+    lower.endsWith('.temp') ||
+    lower.includes('undo-tree') ||
+    lower === '.git' ||
+    lower === '.hg' ||
+    lower === '.svn' ||
+    lower === 'node_modules';
+}
+
+function looksLikeSkippableFile(uri: string): boolean {
+  const name = nameFromSafUri(uri);
+  return name.includes('.') || shouldIgnoreSafName(name);
+}
+
+function getContentUriModule(): ContentUriModule | null {
+  const globalWithModule = globalThis as typeof globalThis & {
+    __postepContentUri?: ContentUriModule;
+  };
+  return globalWithModule.__postepContentUri ?? null;
+}
+
+function isGenericContentUri(uri: string): boolean {
+  return uri.startsWith('content://') && !uri.startsWith('content://com.android.externalstorage');
 }
 
 function safeDecode(uri: string): string {
