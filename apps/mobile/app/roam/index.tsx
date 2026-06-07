@@ -8,9 +8,9 @@ import {
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 
-import { loadRoamGraphAsync } from "@postep/bridge";
 import { useBridgeConfig } from "../../store/orgConfig";
 import { useBridgeEvent } from "../../hooks/useBridgeEvent";
+import { loadRoamGraphForConfig } from "../../lib/roamSources";
 
 type RoamMode = "graph" | "backlinks" | "tags";
 
@@ -25,9 +25,9 @@ export default function RoamScreen() {
       config.roamRoots?.join(":") ?? "",
     ],
     queryFn: () =>
-      config.roots.length === 0
+      config.roots.length === 0 && (config.roamRoots?.length ?? 0) === 0
         ? Promise.resolve({ nodes: [], links: [] })
-        : loadRoamGraphAsync(config),
+        : loadRoamGraphForConfig(config),
   });
 
   useBridgeEvent("documentsChanged", () => roamQuery.refetch());
