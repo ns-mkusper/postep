@@ -87,6 +87,55 @@ cleanup() {
 }
 trap cleanup EXIT
 
+window_xml() {
+  adb_cmd shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || return 1
+  adb_cmd exec-out cat /sdcard/window.xml || true
+}
+
+tap_xml_text() {
+  local xml="$1"
+  local label="$2"
+  local node
+  local bounds
+  local x1 y1 x2 y2 x y
+
+  node="$(grep -o "<node[^>]*text=\"${label}\"[^>]*>" <<<"$xml" | head -n 1 || true)"
+  if [[ -z "$node" ]]; then
+    node="$(grep -o "<node[^>]*content-desc=\"${label}\"[^>]*>" <<<"$xml" | head -n 1 || true)"
+  fi
+  if [[ -z "$node" ]]; then
+    return 1
+  fi
+
+  bounds="$(sed -n 's/.*bounds="\[\([0-9][0-9]*\),\([0-9][0-9]*\)\]\[\([0-9][0-9]*\),\([0-9][0-9]*\)\]".*/\1 \2 \3 \4/p' <<<"$node")"
+  if [[ -z "$bounds" ]]; then
+    return 1
+  fi
+
+  read -r x1 y1 x2 y2 <<<"$bounds"
+  x=$(((x1 + x2) / 2))
+  y=$(((y1 + y2) / 2))
+  adb_cmd shell input tap "$x" "$y" || true
+}
+
+dismiss_system_dialogs() {
+  local xml
+
+  for _ in $(seq 1 3); do
+    xml="$(window_xml || true)"
+    if ! grep -Eiq "Pixel Launcher|Launcher3|nexuslauncher|isn.?t responding|Close app" <<<"$xml"; then
+      return 0
+    fi
+
+    log "Dismissing Android system dialog before screenshot capture"
+    tap_xml_text "$xml" "Wait" || \
+      tap_xml_text "$xml" "OK" || \
+      tap_xml_text "$xml" "Close app" || \
+      adb_cmd shell input keyevent KEYCODE_ESCAPE || true
+    sleep 1
+  done
+}
+
 wait_for_text() {
   local timeout_seconds="$1"
   shift
@@ -94,26 +143,22 @@ wait_for_text() {
   local deadline=$((SECONDS + timeout_seconds))
 
   while (( SECONDS < deadline )); do
-    if adb_cmd shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1; then
-      local window_xml
-      window_xml="$(adb_cmd exec-out cat /sdcard/window.xml || true)"
+    local xml
+    xml="$(window_xml || true)"
+    if [[ -n "$xml" ]]; then
+      dismiss_system_dialogs
+      xml="$(window_xml || true)"
       for text in "${expected_texts[@]}"; do
-        if grep -Fq "$text" <<<"$window_xml"; then
+        if grep -Fq "$text" <<<"$xml"; then
           return 0
         fi
       done
-      if grep -Fq "isn't responding" <<<"$window_xml"; then
-        log "Dismissing Android ANR dialog while waiting for: ${expected_texts[*]}"
-        adb_cmd shell input tap 540 1360 || true
-        adb_cmd shell am start -W -n "$APP_ACTIVITY" >/dev/null || true
-      fi
     fi
     sleep 2
   done
 
   log "Timed out waiting for text: ${expected_texts[*]}"
-  adb_cmd shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
-  adb_cmd exec-out cat /sdcard/window.xml || true
+  window_xml || true
   return 1
 }
 
@@ -121,7 +166,9 @@ capture() {
   local name="$1"
   shift
   wait_for_text 90 "$@"
+  dismiss_system_dialogs
   sleep 2
+  dismiss_system_dialogs
   adb_cmd exec-out screencap -p > "$SCREENSHOT_DIR/${name}.png"
   test -s "$SCREENSHOT_DIR/${name}.png"
   log "Captured $SCREENSHOT_DIR/${name}.png"
@@ -130,10 +177,12 @@ capture() {
 open_route() {
   local route="$1"
   log "Opening route: $route"
+  dismiss_system_dialogs
   adb_cmd shell am start -W -a android.intent.action.VIEW -d "postep://$route" -p "$APP_ID" >/dev/null || \
     adb_cmd shell am start -W -a android.intent.action.VIEW -d "postep:///$route" -p "$APP_ID" >/dev/null || \
     adb_cmd shell monkey -p "$APP_ID" 1 >/dev/null
   sleep 4
+  dismiss_system_dialogs
 }
 
 install_apk() {
