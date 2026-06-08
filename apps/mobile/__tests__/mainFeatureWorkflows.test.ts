@@ -8,6 +8,7 @@ import {
   addHabitBlock,
   appendCapture,
   budgeted,
+  buildRoamExplorerWorkflow,
   buildRoamModeView,
   deleteHabitBlock,
   groupAgendaByDay,
@@ -61,12 +62,25 @@ const roamGraph: RoamGraph = {
   nodes: Array.from({ length: 10 }, (_, idx) => ({
     id: `sample-${String(idx + 1).padStart(2, '0')}`,
     title: `E2E Org Sample ${idx + 1}`,
-    path: `sample-${String(idx + 1).padStart(2, '0')}.org`,
+    path: idx === 0 ? 'daily/2026-06-01.org' : `sample-${String(idx + 1).padStart(2, '0')}.org`,
     tags: ['habit', idx % 2 === 0 ? 'daily' : 'agenda']
   })),
   links: Array.from({ length: 10 }, (_, idx) => ({
     source: `sample-${String(idx + 1).padStart(2, '0')}`,
     target: `sample-${String(((idx + 1) % 10) + 1).padStart(2, '0')}`
+  }))
+};
+
+const largeRoamGraph: RoamGraph = {
+  nodes: Array.from({ length: 400 }, (_, idx) => ({
+    id: `large-${String(idx + 1).padStart(3, '0')}`,
+    title: `Large Roam Note ${idx + 1}`,
+    path: idx % 14 === 0 ? `daily/2026-06-${String((idx % 28) + 1).padStart(2, '0')}.org` : `large-${idx + 1}.org`,
+    tags: [`topic-${idx % 20}`, idx % 3 === 0 ? 'daily' : 'project']
+  })),
+  links: Array.from({ length: 800 }, (_, idx) => ({
+    source: `large-${String((idx % 400) + 1).padStart(3, '0')}`,
+    target: `large-${String(((idx * 7 + 13) % 400) + 1).padStart(3, '0')}`
   }))
 };
 
@@ -151,6 +165,43 @@ describe('main feature workflows stay inside tight interaction budgets', () => {
     assert.ok((value[1] as any).backlinks.length >= 1);
     assert.ok((value[2] as any).tags.habit >= 10);
     assert.ok(metric.elapsedMs <= budgetMs, `roam mode build took ${metric.elapsedMs}ms`);
+  });
+
+  it('builds the roam explorer view model with relationships and filters inside budget', () => {
+    const { value, metric, budgetMs } = budgeted('roamExplorer', () =>
+      buildRoamExplorerWorkflow(roamGraph, {
+        selectedId: 'sample-01',
+        activeTag: 'daily',
+        relationshipFilter: 'linked'
+      })
+    );
+    assert.equal(value.summary.nodes, 10);
+    assert.equal(value.selectedNode?.id, 'sample-01');
+    assert.ok(value.backlinks.length >= 1);
+    assert.ok(value.forwardLinks.length >= 1);
+    assert.ok(value.relatedNotes.length >= 1);
+    assert.ok(value.tagGroups.some((group) => group.tag === 'daily'));
+    assert.equal(value.dailyNotes[0]?.dailyDate, '2026-06-01');
+    assert.ok(value.filteredNodes.every((node) => node.tags.includes('daily')));
+    assert.ok(metric.elapsedMs <= budgetMs, `roam explorer build took ${metric.elapsedMs}ms`);
+  });
+
+  it('keeps large roam graph filtering responsive inside budget', () => {
+    const queries = ['large roam note 1', 'topic-7', 'daily', 'project'];
+    const { value, metric, budgetMs } = budgeted('roamResponsiveness', () =>
+      queries.map((query, idx) =>
+        buildRoamExplorerWorkflow(largeRoamGraph, {
+          selectedId: `large-${String(idx + 1).padStart(3, '0')}`,
+          query,
+          activeTag: idx % 2 === 0 ? null : `topic-${idx + 3}`,
+          relationshipFilter: idx === 2 ? 'daily' : 'linked'
+        })
+      )
+    );
+    assert.equal(value.length, queries.length);
+    assert.ok(value.every((view) => view.summary.nodes === 400));
+    assert.ok(value.some((view) => view.filteredNodes.length > 0));
+    assert.ok(metric.elapsedMs <= budgetMs, `large roam filtering took ${metric.elapsedMs}ms`);
   });
 
   it('switches between main feature routes inside budget', () => {

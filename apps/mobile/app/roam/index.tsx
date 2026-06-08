@@ -5,18 +5,42 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
+  ScrollView,
+  TextInput,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
+import { router } from "expo-router";
 
 import { useBridgeConfig } from "../../store/orgConfig";
 import { useBridgeEvent } from "../../hooks/useBridgeEvent";
 import { loadRoamGraphForConfig } from "../../lib/roamSources";
+import {
+  buildRoamExplorerView,
+  type RoamNodeSummary,
+  type RoamPanel,
+  type RoamRelationshipFilter,
+} from "../../lib/roamViewModel";
 
-type RoamMode = "graph" | "backlinks" | "tags";
+type FilterOption = {
+  label: string;
+  value: RoamRelationshipFilter;
+};
+
+const FILTERS: FilterOption[] = [
+  { label: "All", value: "all" },
+  { label: "Linked", value: "linked" },
+  { label: "Unlinked", value: "unlinked" },
+  { label: "Daily", value: "daily" },
+];
 
 export default function RoamScreen() {
   const config = useBridgeConfig();
-  const [mode, setMode] = useState<RoamMode>("graph");
+  const [mode, setMode] = useState<RoamPanel>("graph");
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [relationshipFilter, setRelationshipFilter] =
+    useState<RoamRelationshipFilter>("all");
 
   const roamQuery = useQuery({
     queryKey: [
@@ -33,56 +57,49 @@ export default function RoamScreen() {
   useBridgeEvent("documentsChanged", () => roamQuery.refetch());
   useBridgeEvent("rootsChanged", () => roamQuery.refetch());
 
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const explorer = useMemo(
+    () =>
+      buildRoamExplorerView(roamQuery.data ?? { nodes: [], links: [] }, {
+        selectedId: selectedNodeId,
+        query,
+        activeTag,
+        relationshipFilter,
+      }),
+    [activeTag, query, relationshipFilter, roamQuery.data, selectedNodeId],
+  );
 
   useEffect(() => {
-    if (!selectedNodeId && roamQuery.data && roamQuery.data.nodes.length > 0) {
-      setSelectedNodeId(roamQuery.data.nodes[0].id);
+    if (!selectedNodeId && explorer.selectedNode) {
+      setSelectedNodeId(explorer.selectedNode.id);
     }
-  }, [roamQuery.data, selectedNodeId]);
+  }, [explorer.selectedNode, selectedNodeId]);
 
-  const selectedNode = useMemo(() => {
-    if (!selectedNodeId || !roamQuery.data) {
-      return null;
-    }
-    return (
-      roamQuery.data.nodes.find((node) => node.id === selectedNodeId) ?? null
-    );
-  }, [selectedNodeId, roamQuery.data]);
+  const selectNode = (nodeId: string) => {
+    setSelectedNodeId(nodeId);
+  };
 
-  const backlinks = useMemo(() => {
-    if (!selectedNode || !roamQuery.data) {
-      return [];
-    }
-    const inbound = roamQuery.data.links.filter(
-      (link) => link.target === selectedNode.id,
-    );
-    return inbound
-      .map((link) =>
-        roamQuery.data.nodes.find((node) => node.id === link.source),
-      )
-      .filter((node): node is NonNullable<typeof node> => Boolean(node));
-  }, [selectedNode, roamQuery.data]);
+  const openNode = (node: RoamNodeSummary) => {
+    router.push({ pathname: "/library", params: { path: node.path } });
+  };
 
-  const tagGroups = useMemo(() => {
-    const groups: Record<string, number> = {};
-    for (const node of roamQuery.data?.nodes ?? []) {
-      for (const tag of node.tags) {
-        groups[tag] = (groups[tag] ?? 0) + 1;
-      }
-    }
-    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
-  }, [roamQuery.data?.nodes]);
-
-  const graphStats = useMemo(() => {
-    const nodes = roamQuery.data?.nodes.length ?? 0;
-    const links = roamQuery.data?.links.length ?? 0;
-    return { nodes, links, density: nodes === 0 ? 0 : links / nodes };
-  }, [roamQuery.data]);
+  const toggleTag = (tag: string) => {
+    setActiveTag((current) => (current === tag ? null : tag));
+  };
 
   return (
-    <View style={styles.container} testID="roam-screen">
-      <Text style={styles.header}>Roam Nodes</Text>
+    <ScrollView style={styles.container} testID="roam-screen">
+      <View style={styles.headerRow}>
+        <View>
+          <Text style={styles.kicker}>Org-roam</Text>
+          <Text style={styles.header}>Knowledge Graph</Text>
+        </View>
+        <View style={styles.statusPill} testID="roam-source-status">
+          <Text style={styles.statusText}>
+            {roamQuery.isFetching ? "Refreshing" : `${explorer.summary.nodes} notes`}
+          </Text>
+        </View>
+      </View>
+
       <View style={styles.modeRow} testID="roam-mode-row">
         {(["graph", "backlinks", "tags"] as const).map((option) => (
           <TouchableOpacity
@@ -99,9 +116,59 @@ export default function RoamScreen() {
         ))}
       </View>
 
+      <View style={styles.searchCard} testID="roam-filter-panel">
+        <TextInput
+          testID="roam-search-input"
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search notes, paths, tags"
+          placeholderTextColor="#7D8676"
+          style={styles.searchInput}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        <View style={styles.filterRow}>
+          {FILTERS.map((filter) => (
+            <TouchableOpacity
+              key={filter.value}
+              testID={`roam-filter-${filter.value}`}
+              style={[
+                styles.filterChip,
+                relationshipFilter === filter.value && styles.filterChipSelected,
+              ]}
+              onPress={() => setRelationshipFilter(filter.value)}
+            >
+              <Text style={styles.filterText}>{filter.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        {(query || activeTag || relationshipFilter !== "all") && (
+          <TouchableOpacity
+            testID="roam-clear-filters"
+            style={styles.clearButton}
+            onPress={() => {
+              setQuery("");
+              setActiveTag(null);
+              setRelationshipFilter("all");
+            }}
+          >
+            <Text style={styles.clearText}>Clear filters</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <View style={styles.statsGrid} testID="roam-graph-mode">
+        <StatCard label="Notes" value={String(explorer.summary.nodes)} />
+        <StatCard label="Links" value={String(explorer.summary.links)} />
+        <StatCard label="Tags" value={String(explorer.summary.tags)} />
+        <StatCard label="Isolated" value={String(explorer.summary.isolated)} />
+        <StatCard label="Density" value={explorer.summary.density.toFixed(2)} />
+      </View>
+
+      <Text style={styles.sectionLabel}>Matching notes</Text>
       <FlatList
         testID="roam-node-list"
-        data={roamQuery.data?.nodes ?? []}
+        data={explorer.filteredNodes}
         horizontal
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.nodeList}
@@ -112,64 +179,187 @@ export default function RoamScreen() {
               styles.nodeChip,
               selectedNodeId === item.id && styles.nodeChipSelected,
             ]}
-            onPress={() => setSelectedNodeId(item.id)}
+            onPress={() => selectNode(item.id)}
           >
             <Text style={styles.nodeChipText}>{item.title}</Text>
+            <Text style={styles.nodeChipMeta}>
+              {item.incomingCount} in · {item.outgoingCount} out
+            </Text>
           </TouchableOpacity>
         )}
         ListEmptyComponent={() => (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>
-              Pick an Org-roam directory to see backlinks.
+              {explorer.emptyReason === "no-matches"
+                ? "No Roam notes match these filters."
+                : "Pick an Org-roam directory to see backlinks."}
             </Text>
           </View>
         )}
       />
 
-      {mode === "graph" && (
-        <View style={styles.detailCard} testID="roam-graph-mode">
-          <Text style={styles.detailTitle}>Graph overview</Text>
-          <Text style={styles.backlink}>Nodes: {graphStats.nodes}</Text>
-          <Text style={styles.backlink}>Links: {graphStats.links}</Text>
-          <Text style={styles.backlink}>
-            Density: {graphStats.density.toFixed(2)}
-          </Text>
-        </View>
+      {explorer.selectedNode && (
+        <SelectedNoteCard node={explorer.selectedNode} onOpen={openNode} />
       )}
 
-      {mode === "backlinks" && selectedNode && (
+      {(mode === "graph" || mode === "backlinks") && explorer.selectedNode && (
         <View style={styles.detailCard} testID="roam-backlinks-mode">
-          <Text style={styles.detailTitle}>{selectedNode.title}</Text>
-          <Text style={styles.detailPath}>{selectedNode.path}</Text>
-          <Text style={styles.sectionLabel}>Backlinks</Text>
-          {backlinks.length === 0 && (
-            <Text style={styles.emptyText}>No backlinks yet.</Text>
+          <RelationshipSection
+            title="Backlinks"
+            empty="No backlinks yet."
+            nodes={explorer.backlinks}
+            onSelect={selectNode}
+            testID="roam-backlink-list"
+          />
+          <RelationshipSection
+            title="Forward links"
+            empty="No forward links yet."
+            nodes={explorer.forwardLinks}
+            onSelect={selectNode}
+            testID="roam-forward-link-list"
+          />
+          <Text style={styles.sectionLabel}>Related notes</Text>
+          {explorer.relatedNotes.length === 0 && (
+            <Text style={styles.emptyTextLeft}>No related notes yet.</Text>
           )}
-          {backlinks.map((node) => (
-            <Text key={node.id} style={styles.backlink}>
-              • {node.title}
-            </Text>
+          {explorer.relatedNotes.map((item) => (
+            <TouchableOpacity
+              key={item.node.id}
+              testID={`roam-related-${item.node.id}`}
+              style={styles.relationshipItem}
+              onPress={() => selectNode(item.node.id)}
+            >
+              <Text style={styles.relationshipTitle}>{item.node.title}</Text>
+              <Text style={styles.relationshipMeta}>{item.reasons.join(" · ")}</Text>
+            </TouchableOpacity>
           ))}
         </View>
       )}
 
-      {mode === "tags" && (
+      {(mode === "graph" || mode === "tags") && (
         <View style={styles.detailCard} testID="roam-tags-mode">
-          <Text style={styles.detailTitle}>Tags</Text>
+          <Text style={styles.detailTitle}>Topics</Text>
           <View style={styles.tagRow}>
-            {tagGroups.length === 0 && (
-              <Text style={styles.emptyText}>No tags</Text>
+            {explorer.tagGroups.length === 0 && (
+              <Text style={styles.emptyTextLeft}>No tags</Text>
             )}
-            {tagGroups.map(([tag, count]) => (
-              <View key={tag} style={styles.tagChip}>
+            {explorer.tagGroups.map((group) => (
+              <TouchableOpacity
+                key={group.tag}
+                testID={`roam-tag-${group.tag}`}
+                style={[
+                  styles.tagChip,
+                  activeTag === group.tag && styles.tagChipSelected,
+                ]}
+                onPress={() => toggleTag(group.tag)}
+              >
                 <Text style={styles.tagText}>
-                  {tag} · {count}
+                  {group.tag} · {group.count}
                 </Text>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         </View>
       )}
+
+      {mode === "graph" && (
+        <View style={styles.detailCard} testID="roam-daily-mode">
+          <Text style={styles.detailTitle}>Daily / recent</Text>
+          {explorer.dailyNotes.length === 0 && (
+            <Text style={styles.emptyTextLeft}>No daily notes detected.</Text>
+          )}
+          {explorer.dailyNotes.slice(0, 8).map((node) => (
+            <TouchableOpacity
+              key={node.id}
+              testID={`roam-daily-${node.id}`}
+              style={styles.relationshipItem}
+              onPress={() => selectNode(node.id)}
+            >
+              <Text style={styles.relationshipTitle}>{node.title}</Text>
+              <Text style={styles.relationshipMeta}>{node.dailyDate}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.statCard}>
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function SelectedNoteCard({
+  node,
+  onOpen,
+}: {
+  node: RoamNodeSummary;
+  onOpen: (node: RoamNodeSummary) => void;
+}) {
+  return (
+    <View style={styles.selectedCard} testID="roam-selected-note">
+      <View style={styles.selectedHeaderRow}>
+        <View style={styles.selectedTitleBlock}>
+          <Text style={styles.detailTitle}>{node.title}</Text>
+          <Text style={styles.detailPath}>{node.path}</Text>
+        </View>
+        <TouchableOpacity
+          testID="roam-open-selected-note"
+          style={styles.openNoteButton}
+          onPress={() => onOpen(node)}
+        >
+          <Text style={styles.openNoteButtonText}>Open</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.noteMetaRow}>
+        <Text style={styles.noteMeta}>{node.incomingCount} backlinks</Text>
+        <Text style={styles.noteMeta}>{node.outgoingCount} forward</Text>
+        {node.dailyDate && <Text style={styles.noteMeta}>{node.dailyDate}</Text>}
+      </View>
+      <View style={styles.tagRow}>
+        {node.tags.map((tag) => (
+          <View key={tag} style={styles.smallTagChip}>
+            <Text style={styles.tagText}>{tag}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function RelationshipSection({
+  title,
+  empty,
+  nodes,
+  onSelect,
+  testID,
+}: {
+  title: string;
+  empty: string;
+  nodes: RoamNodeSummary[];
+  onSelect: (nodeId: string) => void;
+  testID: string;
+}) {
+  return (
+    <View testID={testID}>
+      <Text style={styles.sectionLabel}>{title}</Text>
+      {nodes.length === 0 && <Text style={styles.emptyTextLeft}>{empty}</Text>}
+      {nodes.map((node) => (
+        <TouchableOpacity
+          key={node.id}
+          testID={`roam-link-${node.id}`}
+          style={styles.relationshipItem}
+          onPress={() => onSelect(node.id)}
+        >
+          <Text style={styles.relationshipTitle}>• {node.title}</Text>
+          <Text style={styles.relationshipMeta}>{node.path}</Text>
+        </TouchableOpacity>
+      ))}
     </View>
   );
 }
@@ -180,12 +370,39 @@ const styles = StyleSheet.create({
     backgroundColor: "#071008",
     padding: 14,
   },
+  headerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    marginBottom: 14,
+  },
+  kicker: {
+    color: "#9BA394",
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 1.2,
+  },
   header: {
     color: "#F2F5EC",
     fontSize: 28,
     lineHeight: 34,
     fontWeight: "800",
-    marginBottom: 14,
+  },
+  statusPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#3D4638",
+    backgroundColor: "#111A10",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  statusText: {
+    color: "#DDE5D4",
+    fontSize: 13,
+    fontWeight: "800",
   },
   modeRow: {
     flexDirection: "row",
@@ -210,6 +427,82 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 16,
   },
+  searchCard: {
+    backgroundColor: "#091108",
+    borderRadius: 18,
+    padding: 12,
+    borderWidth: 1.5,
+    borderColor: "#3D4638",
+    marginBottom: 14,
+  },
+  searchInput: {
+    color: "#F2F5EC",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#303B2D",
+    backgroundColor: "#071008",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    marginBottom: 10,
+  },
+  filterRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  filterChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#303B2D",
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    backgroundColor: "#111A10",
+  },
+  filterChipSelected: {
+    backgroundColor: "#394A23",
+    borderColor: "#66774A",
+  },
+  filterText: {
+    color: "#DDE5D4",
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  clearButton: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+  },
+  clearText: {
+    color: "#BDD18A",
+    fontWeight: "800",
+  },
+  statsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 14,
+  },
+  statCard: {
+    minWidth: 96,
+    flexGrow: 1,
+    backgroundColor: "#091108",
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1.5,
+    borderColor: "#3D4638",
+  },
+  statValue: {
+    color: "#F2F5EC",
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: "800",
+  },
+  statLabel: {
+    color: "#9BA394",
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "700",
+  },
   nodeList: {
     paddingVertical: 8,
     paddingRight: 16,
@@ -222,6 +515,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginRight: 10,
     backgroundColor: "#091108",
+    minWidth: 150,
   },
   nodeChipSelected: {
     backgroundColor: "#1E271B",
@@ -231,9 +525,45 @@ const styles = StyleSheet.create({
     color: "#DDE5D4",
     fontSize: 17,
     lineHeight: 23,
+    fontWeight: "800",
+  },
+  nodeChipMeta: {
+    color: "#9BA394",
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 3,
+  },
+  selectedCard: {
+    marginTop: 12,
+    backgroundColor: "#14200F",
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: "#66774A",
+  },
+  selectedHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  selectedTitleBlock: {
+    flex: 1,
+  },
+  openNoteButton: {
+    borderRadius: 999,
+    backgroundColor: "#BDD18A",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  openNoteButtonText: {
+    color: "#071008",
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "900",
   },
   detailCard: {
-    marginTop: 20,
+    marginTop: 14,
     backgroundColor: "#091108",
     borderRadius: 18,
     padding: 16,
@@ -242,8 +572,8 @@ const styles = StyleSheet.create({
   },
   detailTitle: {
     color: "#F2F5EC",
-    fontSize: 26,
-    lineHeight: 32,
+    fontSize: 24,
+    lineHeight: 30,
     fontWeight: "800",
   },
   detailPath: {
@@ -252,46 +582,93 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginTop: 5,
   },
+  noteMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 10,
+  },
+  noteMeta: {
+    color: "#DDE5D4",
+    backgroundColor: "#223018",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    overflow: "hidden",
+    fontSize: 13,
+    fontWeight: "800",
+  },
   sectionLabel: {
     color: "#9BA394",
     fontSize: 13,
     textTransform: "uppercase",
-    marginTop: 18,
-    marginBottom: 6,
+    marginTop: 8,
+    marginBottom: 8,
     fontWeight: "800",
+    letterSpacing: 0.8,
   },
   tagRow: {
     flexDirection: "row",
     flexWrap: "wrap",
+    gap: 8,
   },
   tagChip: {
     backgroundColor: "#1E271B",
     borderRadius: 11,
     paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: "#3D4638",
+  },
+  tagChipSelected: {
+    backgroundColor: "#394A23",
+    borderColor: "#BDD18A",
+  },
+  smallTagChip: {
+    backgroundColor: "#1E271B",
+    borderRadius: 11,
+    paddingHorizontal: 9,
     paddingVertical: 5,
-    marginRight: 8,
-    marginBottom: 8,
   },
   tagText: {
     color: "#CDD5C5",
     fontSize: 15,
+    fontWeight: "700",
   },
-  backlink: {
+  relationshipItem: {
+    borderTopWidth: 1,
+    borderTopColor: "#1F2A1C",
+    paddingVertical: 10,
+  },
+  relationshipTitle: {
     color: "#DDE5D4",
-    marginBottom: 6,
-    fontSize: 19,
-    lineHeight: 27,
+    fontSize: 18,
+    lineHeight: 25,
+    fontWeight: "800",
+  },
+  relationshipMeta: {
+    color: "#8C9486",
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 2,
   },
   empty: {
-    flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    padding: 40,
+    padding: 24,
+    minWidth: 260,
   },
   emptyText: {
     color: "#8C9486",
     fontSize: 18,
     lineHeight: 25,
     textAlign: "center",
+  },
+  emptyTextLeft: {
+    color: "#8C9486",
+    fontSize: 16,
+    lineHeight: 23,
+    marginBottom: 6,
   },
 });
