@@ -88,19 +88,22 @@ cleanup() {
 trap cleanup EXIT
 
 wait_for_text() {
-  local text="$1"
-  local timeout_seconds="${2:-60}"
+  local timeout_seconds="$1"
+  shift
+  local expected_texts=("$@")
   local deadline=$((SECONDS + timeout_seconds))
 
   while (( SECONDS < deadline )); do
     if adb_cmd shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1; then
       local window_xml
       window_xml="$(adb_cmd exec-out cat /sdcard/window.xml || true)"
-      if grep -Fq "$text" <<<"$window_xml"; then
-        return 0
-      fi
+      for text in "${expected_texts[@]}"; do
+        if grep -Fq "$text" <<<"$window_xml"; then
+          return 0
+        fi
+      done
       if grep -Fq "isn't responding" <<<"$window_xml"; then
-        log "Dismissing Android ANR dialog while waiting for: $text"
+        log "Dismissing Android ANR dialog while waiting for: ${expected_texts[*]}"
         adb_cmd shell input tap 540 1360 || true
         adb_cmd shell am start -W -n "$APP_ACTIVITY" >/dev/null || true
       fi
@@ -108,7 +111,7 @@ wait_for_text() {
     sleep 2
   done
 
-  log "Timed out waiting for text: $text"
+  log "Timed out waiting for text: ${expected_texts[*]}"
   adb_cmd shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
   adb_cmd exec-out cat /sdcard/window.xml || true
   return 1
@@ -116,8 +119,8 @@ wait_for_text() {
 
 capture() {
   local name="$1"
-  local expected_text="$2"
-  wait_for_text "$expected_text" 90
+  shift
+  wait_for_text 90 "$@"
   sleep 2
   adb_cmd exec-out screencap -p > "$SCREENSHOT_DIR/${name}.png"
   test -s "$SCREENSHOT_DIR/${name}.png"
@@ -218,7 +221,7 @@ open_route "habits"
 capture "04-habits" "Morning habit"
 
 open_route "roam"
-capture "05-roam-graph" "Roam Nodes"
+capture "05-roam-graph" "Roam Nodes" "Knowledge Graph"
 
 log "Screenshots ready"
 ls -lh "$SCREENSHOT_DIR"
