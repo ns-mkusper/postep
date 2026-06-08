@@ -21,6 +21,14 @@ pub struct RoamLink {
     pub target: String,
 }
 
+#[derive(Debug, Clone)]
+struct RoamDocumentMetadata {
+    id: String,
+    aliases: Vec<String>,
+    title: String,
+    tags: Vec<String>,
+}
+
 #[derive(Debug, Default)]
 pub struct OrgRoamGraph {
     graph: Graph<RoamNode, RoamLink>,
@@ -55,6 +63,7 @@ impl OrgRoamGraph {
 pub fn build_roam_graph(service: &OrgService) -> Result<OrgRoamGraph> {
     let mut graph = OrgRoamGraph::default();
     let mut link_buffer: Vec<(String, String)> = Vec::new();
+    let mut alias_to_node_id: HashMap<String, String> = HashMap::new();
 
     for path in service.list_documents() {
         let Ok(doc) = service.get_document(&path) else {
@@ -64,20 +73,27 @@ pub fn build_roam_graph(service: &OrgService) -> Result<OrgRoamGraph> {
             continue;
         }
 
-        let node_id = compute_node_id(&path);
+        let metadata = document_metadata(&path, &doc);
         let node_index = graph.graph.add_node(RoamNode {
-            id: node_id.clone(),
-            title: compute_node_id(&path),
+            id: metadata.id.clone(),
+            title: metadata.title,
             path: path.clone(),
-            tags: Vec::new(),
+            tags: metadata.tags,
         });
-        graph.index_by_id.insert(node_id.clone(), node_index);
+        graph.index_by_id.insert(metadata.id.clone(), node_index);
+        for alias in metadata.aliases {
+            alias_to_node_id.insert(alias, metadata.id.clone());
+        }
 
-        link_buffer.extend(extract_links(node_id, &doc));
+        link_buffer.extend(extract_links(metadata.id, &doc));
     }
 
     let mut seen_edges: HashSet<(String, String)> = HashSet::new();
-    for (source, target) in link_buffer {
+    for (source, target_alias) in link_buffer {
+        let target = alias_to_node_id
+            .get(&target_alias)
+            .cloned()
+            .unwrap_or(target_alias);
         if source == target || !seen_edges.insert((source.clone(), target.clone())) {
             continue;
         }
@@ -95,21 +111,154 @@ pub fn build_roam_graph(service: &OrgService) -> Result<OrgRoamGraph> {
     Ok(graph)
 }
 
+fn document_metadata(path: &PathBuf, doc: &OrgDocument) -> RoamDocumentMetadata {
+    let fallback_id = compute_node_id(path);
+    let org_id = extract_org_id(doc.raw());
+    let id = org_id.clone().unwrap_or_else(|| fallback_id.clone());
+    let mut aliases = vec![fallback_id.clone(), id.clone()];
+    if let Some(org_id) = org_id {
+        aliases.push(org_id);
+    }
+    aliases.sort();
+    aliases.dedup();
+
+    RoamDocumentMetadata {
+        id,
+        aliases,
+        title: extract_title(doc.raw()).unwrap_or(fallback_id),
+        tags: extract_tags(doc.raw()),
+    }
+}
+
 fn extract_links(node_id: String, doc: &OrgDocument) -> Vec<(String, String)> {
     doc.raw()
         .lines()
-        .filter_map(|line| parse_roam_link(line).map(|target| (node_id.clone(), target)))
+        .flat_map(parse_roam_links)
+        .filter_map(normalize_link_target)
+        .map(|target| (node_id.clone(), target))
         .collect()
 }
 
+fn parse_roam_links(line: &str) -> Vec<String> {
+    let mut links = Vec::new();
+    let mut rest = line;
+    while let Some(start) = rest.find("[[") {
+        let after_start = &rest[start + 2..];
+        let Some(end) = after_start.find("]]") else {
+            break;
+        };
+        let raw = &after_start[..end];
+        if !raw.is_empty() {
+            let target = raw.split("][").next().unwrap_or(raw).trim();
+            if !target.is_empty() {
+                links.push(target.to_string());
+            }
+        }
+        rest = &after_start[end + 2..];
+    }
+    links
+}
+
+#[cfg(test)]
 fn parse_roam_link(line: &str) -> Option<String> {
-    let start = line.find("[[")?;
-    let rest = &line[start + 2..];
-    let end = rest.find("]]")?;
-    if end == 0 {
+    parse_roam_links(line).into_iter().next()
+}
+
+fn normalize_link_target(target: String) -> Option<String> {
+    let trimmed = target.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with("http:")
+        || trimmed.starts_with("https:")
+        || trimmed.starts_with("mailto:")
+    {
         return None;
     }
-    Some(rest[..end].to_string())
+    let without_scheme = trimmed
+        .strip_prefix("id:")
+        .or_else(|| trimmed.strip_prefix("ID:"))
+        .or_else(|| trimmed.strip_prefix("file:"))
+        .or_else(|| trimmed.strip_prefix("FILE:"))
+        .unwrap_or(trimmed);
+    let without_anchor = without_scheme
+        .split('#')
+        .next()
+        .unwrap_or(without_scheme)
+        .split("::")
+        .next()
+        .unwrap_or(without_scheme)
+        .trim();
+    let without_org = without_anchor
+        .strip_suffix(".org")
+        .or_else(|| without_anchor.strip_suffix(".ORG"))
+        .unwrap_or(without_anchor);
+    let normalized = without_org.rsplit('/').next().unwrap_or(without_org).trim();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.to_string())
+    }
+}
+
+fn extract_title(raw: &str) -> Option<String> {
+    raw.lines().find_map(|line| {
+        let trimmed = line.trim();
+        trimmed
+            .strip_prefix("#+TITLE:")
+            .or_else(|| trimmed.strip_prefix("#+title:"))
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn extract_org_id(raw: &str) -> Option<String> {
+    raw.lines().find_map(|line| {
+        let trimmed = line.trim();
+        trimmed
+            .strip_prefix(":ID:")
+            .or_else(|| trimmed.strip_prefix(":id:"))
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn extract_tags(raw: &str) -> Vec<String> {
+    let mut tags = HashSet::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(filetags) = trimmed
+            .strip_prefix("#+FILETAGS:")
+            .or_else(|| trimmed.strip_prefix("#+filetags:"))
+        {
+            for tag in filetags.split(|ch: char| ch == ':' || ch.is_whitespace()) {
+                let tag = tag.trim();
+                if !tag.is_empty() {
+                    tags.insert(tag.to_string());
+                }
+            }
+        }
+        if trimmed.starts_with('*') {
+            if let Some(tag_block) = heading_tag_block(trimmed) {
+                for tag in tag_block.split(':').filter(|tag| !tag.is_empty()) {
+                    tags.insert(tag.to_string());
+                }
+            }
+        }
+    }
+    let mut tags: Vec<_> = tags.into_iter().collect();
+    tags.sort();
+    tags
+}
+
+fn heading_tag_block(line: &str) -> Option<&str> {
+    let before_tags = line.rsplit_once(' ')?;
+    let candidate = before_tags.1;
+    if candidate.len() > 2 && candidate.starts_with(':') && candidate.ends_with(':') {
+        Some(candidate.trim_matches(':'))
+    } else {
+        None
+    }
 }
 
 fn is_roam_file(path: &PathBuf) -> bool {
@@ -148,5 +297,42 @@ mod tests {
         let doc = OrgDocument::from_string("demo", "[[alpha]]\n[[beta]]".into());
         let links = extract_links("source".into(), &doc);
         assert_eq!(links.len(), 2);
+    }
+
+    #[test]
+    fn parse_links_extracts_multiple_targets_and_descriptions() {
+        assert_eq!(
+            parse_roam_links("[[id:alpha][Alpha]] and [[beta.org][Beta]]"),
+            vec!["id:alpha".to_string(), "beta.org".to_string()]
+        );
+    }
+
+    #[test]
+    fn normalize_link_targets_match_node_aliases() {
+        assert_eq!(
+            normalize_link_target("id:alpha".into()),
+            Some("alpha".into())
+        );
+        assert_eq!(
+            normalize_link_target("file:notes/beta.org::Heading".into()),
+            Some("beta".into())
+        );
+        assert_eq!(normalize_link_target("https://example.com".into()), None);
+    }
+
+    #[test]
+    fn metadata_reads_title_id_and_tags() {
+        let doc = OrgDocument::from_string(
+            "demo",
+            "#+TITLE: Better title\n#+FILETAGS: :project:rust:\n:PROPERTIES:\n:ID: node-123\n:END:\n* TODO Work :daily:mobile:\n"
+                .into(),
+        );
+        let metadata = document_metadata(&PathBuf::from("/tmp/fallback.org"), &doc);
+        assert_eq!(metadata.id, "node-123");
+        assert_eq!(metadata.title, "Better title");
+        assert!(metadata.aliases.contains(&"fallback".to_string()));
+        assert!(metadata.tags.contains(&"project".to_string()));
+        assert!(metadata.tags.contains(&"daily".to_string()));
+        assert!(metadata.tags.contains(&"mobile".to_string()));
     }
 }

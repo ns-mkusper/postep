@@ -55,11 +55,31 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
   await page.goto('/roam');
   await expect(page.getByTestId('roam-screen')).toBeVisible();
   await expect(page.getByTestId('roam-graph-mode')).toBeVisible();
+  await expect(page.getByTestId('roam-selected-note')).toBeVisible();
+  await page.getByTestId('roam-filter-linked').click();
+  await expect(page.getByText('10 notes')).toBeVisible();
+  await page.getByTestId('roam-clear-filters').click();
+  await page.getByTestId('roam-search-input').fill('Sample 2');
+  await expect(
+    page.getByTestId('roam-node-list').getByText('E2E Org Sample 2', { exact: true })
+  ).toBeVisible();
   await screenshot(page, '06-roam-graph');
+
   await page.getByTestId('roam-mode-tags').click();
   await expect(page.getByTestId('roam-tags-mode')).toBeVisible();
+  await page.getByTestId('roam-clear-filters').click();
+  await page.getByTestId('roam-tag-habit').click();
+  await expect(
+    page.getByTestId('roam-node-list').getByText('E2E Org Sample 1', { exact: true })
+  ).toBeVisible();
   await screenshot(page, '07-roam-tags');
+
   await page.getByTestId('roam-mode-backlinks').click();
   await expect(page.getByTestId('roam-backlinks-mode')).toBeVisible();
+  await page.getByTestId('roam-node-list').getByText('E2E Org Sample 1', { exact: true }).click();
+  await expect(page.getByTestId('roam-selected-note')).toContainText('E2E Org Sample 1');
+  await expect(page.getByTestId('roam-backlink-list')).toContainText('E2E Org Sample 10');
+  await page.getByTestId('roam-backlink-list').getByText(/E2E Org Sample 10/).click();
+  await expect(page.getByTestId('roam-selected-note')).toContainText('E2E Org Sample 10');
   await screenshot(page, '08-roam-backlinks');
 });

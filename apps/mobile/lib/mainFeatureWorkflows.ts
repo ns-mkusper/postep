@@ -1,5 +1,6 @@
 import type { AgendaItem, Habit, RoamGraph } from '@postep/bridge';
 import { INTERACTION_BUDGET_MS, type InteractionMetric, measureInteraction } from './orgLexicalModel';
+import { buildRoamExplorerView, type RoamExplorerState } from './roamViewModel';
 
 export interface AgendaDayGroup {
   date: string;
@@ -20,6 +21,8 @@ export const MAIN_FEATURE_BUDGET_MS = {
   habitsSummary: 12,
   habitAddDelete: 8,
   roamMode: 12,
+  roamExplorer: 16,
+  roamResponsiveness: 24,
   routeSwitch: 6
 } as const;
 
@@ -108,24 +111,28 @@ export function summarizeHabits(habits: Habit[], today: string): HabitSummary {
 }
 
 export function buildRoamModeView(graph: RoamGraph, mode: 'graph' | 'backlinks' | 'tags', selectedId?: string) {
+  const explorer = buildRoamExplorerView(graph, { selectedId });
   if (mode === 'graph') {
-    return { mode, nodes: graph.nodes.length, links: graph.links.length };
+    return {
+      mode,
+      nodes: explorer.summary.nodes,
+      links: explorer.summary.links,
+      isolated: explorer.summary.isolated,
+      density: explorer.summary.density
+    };
   }
   if (mode === 'tags') {
     const tags: Record<string, number> = {};
-    for (const node of graph.nodes) {
-      for (const tag of node.tags) {
-        tags[tag] = (tags[tag] ?? 0) + 1;
-      }
+    for (const group of explorer.tagGroups) {
+      tags[group.tag] = group.count;
     }
     return { mode, tags };
   }
-  const target = selectedId ?? graph.nodes[0]?.id;
-  const backlinks = graph.links
-    .filter((link) => link.target === target)
-    .map((link) => graph.nodes.find((node) => node.id === link.source))
-    .filter(Boolean);
-  return { mode, backlinks };
+  return { mode, backlinks: explorer.backlinks };
+}
+
+export function buildRoamExplorerWorkflow(graph: RoamGraph, state: RoamExplorerState = {}) {
+  return buildRoamExplorerView(graph, state);
 }
 
 export function selectRoute(currentRoute: string, nextRoute: string): string {
