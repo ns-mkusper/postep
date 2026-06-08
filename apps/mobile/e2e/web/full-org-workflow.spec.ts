@@ -82,4 +82,8 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
   await page.getByTestId('roam-backlink-list').getByText(/E2E Org Sample 10/).click();
   await expect(page.getByTestId('roam-selected-note')).toContainText('E2E Org Sample 10');
   await screenshot(page, '08-roam-backlinks');
+
+  await page.getByTestId('roam-open-selected-note').click();
+  await expect(page.getByTestId('back-to-notes')).toBeVisible();
+  await expect(page.getByText('open app workflow 10')).toBeVisible();
 });

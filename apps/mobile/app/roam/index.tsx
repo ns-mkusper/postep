@@ -9,6 +9,7 @@ import {
   TextInput,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
+import { router } from "expo-router";
 
 import { useBridgeConfig } from "../../store/orgConfig";
 import { useBridgeEvent } from "../../hooks/useBridgeEvent";
@@ -75,6 +76,10 @@ export default function RoamScreen() {
 
   const selectNode = (nodeId: string) => {
     setSelectedNodeId(nodeId);
+  };
+
+  const openNode = (node: RoamNodeSummary) => {
+    router.push({ pathname: "/library", params: { path: node.path } });
   };
 
   const toggleTag = (tag: string) => {
@@ -194,7 +199,7 @@ export default function RoamScreen() {
       />
 
       {explorer.selectedNode && (
-        <SelectedNoteCard node={explorer.selectedNode} />
+        <SelectedNoteCard node={explorer.selectedNode} onOpen={openNode} />
       )}
 
       {(mode === "graph" || mode === "backlinks") && explorer.selectedNode && (
@@ -289,11 +294,28 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SelectedNoteCard({ node }: { node: RoamNodeSummary }) {
+function SelectedNoteCard({
+  node,
+  onOpen,
+}: {
+  node: RoamNodeSummary;
+  onOpen: (node: RoamNodeSummary) => void;
+}) {
   return (
     <View style={styles.selectedCard} testID="roam-selected-note">
-      <Text style={styles.detailTitle}>{node.title}</Text>
-      <Text style={styles.detailPath}>{node.path}</Text>
+      <View style={styles.selectedHeaderRow}>
+        <View style={styles.selectedTitleBlock}>
+          <Text style={styles.detailTitle}>{node.title}</Text>
+          <Text style={styles.detailPath}>{node.path}</Text>
+        </View>
+        <TouchableOpacity
+          testID="roam-open-selected-note"
+          style={styles.openNoteButton}
+          onPress={() => onOpen(node)}
+        >
+          <Text style={styles.openNoteButtonText}>Open</Text>
+        </TouchableOpacity>
+      </View>
       <View style={styles.noteMetaRow}>
         <Text style={styles.noteMeta}>{node.incomingCount} backlinks</Text>
         <Text style={styles.noteMeta}>{node.outgoingCount} forward</Text>
@@ -518,6 +540,27 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1.5,
     borderColor: "#66774A",
+  },
+  selectedHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  selectedTitleBlock: {
+    flex: 1,
+  },
+  openNoteButton: {
+    borderRadius: 999,
+    backgroundColor: "#BDD18A",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  openNoteButtonText: {
+    color: "#071008",
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "900",
   },
   detailCard: {
     marginTop: 14,

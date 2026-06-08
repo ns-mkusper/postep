@@ -16,7 +16,7 @@ import {
   useWindowDimensions,
   type GestureResponderEvent,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -569,6 +569,7 @@ function toggleRawCheckbox(raw: string, lineStart: number): string {
 export default function LibraryScreen() {
   const queryClient = useQueryClient();
   const bridgeConfig = useBridgeConfig();
+  const params = useLocalSearchParams<{ path?: string | string[] }>();
   const insets = useSafeAreaInsets();
   const headerPaddingTop = topSystemInset(insets.top) + 8;
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -597,6 +598,14 @@ export default function LibraryScreen() {
     ],
     queryFn: () => listDocumentsForConfig(bridgeConfig),
   });
+
+  useEffect(() => {
+    const pathParam = Array.isArray(params.path) ? params.path[0] : params.path;
+    if (pathParam && pathParam !== selectedPath) {
+      setSelectedPath(pathParam);
+      setSearchQuery("");
+    }
+  }, [params.path, selectedPath]);
 
   useEffect(() => {
     if (documentsQuery.data && selectedPath) {
