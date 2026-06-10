@@ -39,6 +39,7 @@ import {
 import {
   listDocumentsForConfig,
   loadDocumentForConfig,
+  resolveDocumentPath,
   updateDocumentForConfig,
 } from "../../lib/documentSources";
 
@@ -599,13 +600,29 @@ export default function LibraryScreen() {
     queryFn: () => listDocumentsForConfig(bridgeConfig),
   });
 
+  // Open requests arrive as a route param (e.g. from the roam screen). Apply
+  // each request once and then clear the param: leaving it set would fight the
+  // not-found cleanup effect below in an endless setState loop, and would
+  // re-open the note every time the user navigates back to the grid.
   useEffect(() => {
     const pathParam = Array.isArray(params.path) ? params.path[0] : params.path;
-    if (pathParam && pathParam !== selectedPath) {
-      setSelectedPath(pathParam);
-      setSearchQuery("");
+    if (!pathParam || !documentsQuery.data) {
+      return;
     }
-  }, [params.path, selectedPath]);
+    const resolved = resolveDocumentPath(
+      pathParam,
+      documentsQuery.data.map((doc) => doc.path),
+    );
+    if (resolved) {
+      setSelectedPath(resolved);
+      setSearchQuery("");
+    } else {
+      console.warn("Postep open request did not match any document", {
+        path: pathParam,
+      });
+    }
+    router.setParams({ path: "" });
+  }, [params.path, documentsQuery.data]);
 
   useEffect(() => {
     if (documentsQuery.data && selectedPath) {

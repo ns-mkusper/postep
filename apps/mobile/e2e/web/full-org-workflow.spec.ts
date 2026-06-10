@@ -86,4 +86,12 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
   await page.getByTestId('roam-open-selected-note').click();
   await expect(page.getByTestId('back-to-notes')).toBeVisible();
   await expect(page.getByText('open app workflow 10')).toBeVisible();
+  await screenshot(page, '09-note-opened-from-roam');
+
+  await page.getByTestId('back-to-notes').click();
+  await expect(page.getByTestId('document-chip-list')).toBeVisible();
+  await expect(
+    page.getByTestId('documents-screen').getByText('10 notes')
+  ).toBeVisible();
+  await screenshot(page, '10-back-to-grid-after-roam');
 });

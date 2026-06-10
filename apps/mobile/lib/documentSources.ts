@@ -15,6 +15,28 @@ export function isSafUri(uri: string): boolean {
   return uri.startsWith("content://");
 }
 
+export function resolveDocumentPath(
+  requested: string,
+  paths: string[],
+): string | null {
+  if (paths.includes(requested)) {
+    return requested;
+  }
+  // Paths round-tripped through router params come back URL-decoded once,
+  // which corrupts SAF content:// URIs (their document ids embed %2F/%3A
+  // escapes). Recover by comparing each listing path's decoded form.
+  for (const path of paths) {
+    try {
+      if (decodeURIComponent(path) === requested) {
+        return path;
+      }
+    } catch {
+      // Listing path is not valid percent-encoding; skip it.
+    }
+  }
+  return null;
+}
+
 function splitConfig(config: OrgBridgeConfig): {
   nativeConfig: OrgBridgeConfig;
   safRoots: string[];
