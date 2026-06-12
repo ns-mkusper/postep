@@ -268,16 +268,41 @@ jobs:
         working-directory: ../postep-base/apps/mobile
         run: npm run e2e:android:build
 
+      - name: Free disk space before emulator capture
+        run: |
+          set -euo pipefail
+          mkdir -p apps/mobile/e2e-artifacts/apks
+          cp ../postep-base/apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk apps/mobile/e2e-artifacts/apks/base-app-debug.apk
+          echo "Disk usage before cleanup:"
+          df -h
+          du -sh apps/mobile/android ../postep-base/apps/mobile/android ~/.gradle ~/.npm 2>/dev/null || true
+          rm -rf \
+            apps/mobile/android \
+            ../postep-base/apps/mobile/android \
+            ~/.gradle/caches \
+            ~/.gradle/wrapper \
+            ~/.npm/_cacache
+          sudo rm -rf \
+            "$ANDROID_HOME/system-images" \
+            /usr/share/dotnet \
+            /usr/local/share/boost \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          docker image prune -af || true
+          echo "Disk usage after cleanup:"
+          df -h
+
       - name: Capture before and after emulator screenshots
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
-          target: google_apis
+          target: default
           arch: x86_64
           profile: pixel_6
           disable-animations: true
           script: |
-            bash -euo pipefail -c 'SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-before" METRICS_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-performance-before" APK_PATH="${{ github.workspace }}/../postep-base/apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk" METRO_PORT=8081 EXPO_LOG=/tmp/postep-base-expo-screenshots.log bash "${{ github.workspace }}/../postep-base/apps/mobile/e2e/capture-android-screenshots.sh"'
+            bash -euo pipefail -c 'SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-before" METRICS_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-performance-before" APK_PATH="${{ github.workspace }}/apps/mobile/e2e-artifacts/apks/base-app-debug.apk" METRO_PORT=8081 EXPO_LOG=/tmp/postep-base-expo-screenshots.log bash "${{ github.workspace }}/../postep-base/apps/mobile/e2e/capture-android-screenshots.sh"'
             adb shell am force-stop com.postep.mobile || true
             bash -euo pipefail -c 'SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-after" METRICS_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-performance-after" ANDROID_STRICT_DOCUMENT_ASSERTIONS=1 ANDROID_ENFORCE_PERFORMANCE_BUDGETS=1 APK_PATH="${{ github.workspace }}/apps/mobile/e2e-artifacts/apks/head-app-debug.apk" METRO_PORT=8081 EXPO_LOG=/tmp/postep-head-expo-screenshots.log bash "${{ github.workspace }}/apps/mobile/e2e/capture-android-screenshots.sh"'
 
