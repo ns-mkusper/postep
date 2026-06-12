@@ -5,6 +5,20 @@ import { performance } from 'node:perf_hooks';
 import type { AgendaItem, Habit, RoamGraph } from '@postep/bridge';
 import { createBlockViewModels } from '../lib/orgLexicalModel';
 import {
+  archiveHeading,
+  copyHeadingBlock,
+  cutHeadingBlock,
+  headingChoices,
+  insertHeading,
+  moveHeading,
+  pasteHeadingBlock,
+  refileHeadingUnder,
+  setHeadingPriority,
+  setHeadingState,
+  setPlanningTimestamp,
+  toggleHeadingState
+} from '../lib/orgDocumentActions';
+import {
   addHabitBlock,
   appendCapture,
   budgeted,
@@ -35,6 +49,21 @@ DEADLINE: <2026-06-${day} Mon 09:00>
 Common agenda text.
 `;
 });
+
+const largeOrgDocument = Array.from({ length: 250 }, (_, idx) => {
+  const day = String((idx % 28) + 1).padStart(2, '0');
+  return `* TODO [#A] Project task ${idx + 1} :project:mobile:
+SCHEDULED: <2026-06-${day} Fri 09:00>
+Body paragraph with [[id:sample-${idx + 1}][related task]] and /inline/ markup.
+** NEXT Child task ${idx + 1} :child:
+DEADLINE: <2026-07-${day} Mon 12:00>`;
+}).join('\n');
+
+function lineOfHeading(raw: string, title: string): number {
+  const line = raw.split('\n').findIndex((candidate) => /^\*+\s+/.test(candidate) && candidate.includes(title));
+  assert.ok(line >= 0, `Could not find heading: ${title}`);
+  return line;
+}
 
 const agendaItems: AgendaItem[] = Array.from({ length: 60 }, (_, idx) => ({
   title: `Agenda item ${idx + 1}`,
@@ -202,6 +231,36 @@ describe('main feature workflows stay inside tight interaction budgets', () => {
     assert.ok(value.every((view) => view.summary.nodes === 400));
     assert.ok(value.some((view) => view.filteredNodes.length > 0));
     assert.ok(metric.elapsedMs <= budgetMs, `large roam filtering took ${metric.elapsedMs}ms`);
+  });
+
+  it('keeps large org document widget actions responsive inside budget', () => {
+    const { value, metric, budgetMs } = budgeted('orgDocumentWidgets', () => {
+      let raw = largeOrgDocument;
+      const copiedBlock = copyHeadingBlock(raw, lineOfHeading(raw, 'Project task 120'));
+      raw = pasteHeadingBlock(raw, copiedBlock, lineOfHeading(raw, 'Project task 120'), 'below');
+      raw = moveHeading(raw, lineOfHeading(raw, 'Project task 121'), 'up');
+      raw = moveHeading(raw, lineOfHeading(raw, 'Project task 122'), 'demote');
+      raw = moveHeading(raw, lineOfHeading(raw, 'Project task 122'), 'promote');
+      raw = setPlanningTimestamp(raw, lineOfHeading(raw, 'Project task 123'), 'SCHEDULED', '<2026-06-12 Fri>');
+      raw = setPlanningTimestamp(raw, lineOfHeading(raw, 'Project task 123'), 'DEADLINE', '<2026-06-13 Sat>');
+      raw = setHeadingPriority(raw, lineOfHeading(raw, 'Project task 124'), 'B');
+      raw = setHeadingState(raw, lineOfHeading(raw, 'Project task 124'), 'NEXT');
+      raw = toggleHeadingState(raw, lineOfHeading(raw, 'Project task 125'));
+      raw = insertHeading(raw, 'Added performance child', lineOfHeading(raw, 'Project task 126'), 'under');
+      raw = archiveHeading(raw, lineOfHeading(raw, 'Project task 127'));
+      raw = refileHeadingUnder(raw, lineOfHeading(raw, 'Project task 128'), lineOfHeading(raw, 'Project task 129'));
+      const cut = cutHeadingBlock(raw, lineOfHeading(raw, 'Project task 130'));
+      raw = pasteHeadingBlock(cut.raw, cut.block, lineOfHeading(cut.raw, 'Project task 131'), 'above');
+      return { raw, copiedBlock, choices: headingChoices(raw) };
+    });
+
+    assert.ok(value.copiedBlock.includes('Project task 120'));
+    assert.ok(value.raw.includes('Added performance child'));
+    assert.ok(value.raw.includes('[#B] Project task 124'));
+    assert.ok(value.raw.includes('NEXT [#B] Project task 124'));
+    assert.ok(value.raw.includes(':project:mobile:ARCHIVE:'));
+    assert.ok(value.choices.length >= 500);
+    assert.ok(metric.elapsedMs <= budgetMs, `large org document widget actions took ${metric.elapsedMs}ms`);
   });
 
   it('switches between main feature routes inside budget', () => {

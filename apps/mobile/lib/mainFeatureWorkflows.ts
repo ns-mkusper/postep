@@ -23,6 +23,7 @@ export const MAIN_FEATURE_BUDGET_MS = {
   roamMode: 12,
   roamExplorer: 16,
   roamResponsiveness: 24,
+  orgDocumentWidgets: 80,
   routeSwitch: 6
 } as const;
 

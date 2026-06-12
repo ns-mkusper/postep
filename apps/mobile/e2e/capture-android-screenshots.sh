@@ -17,6 +17,7 @@ ANDROID_ENFORCE_PERFORMANCE_BUDGETS="${ANDROID_ENFORCE_PERFORMANCE_BUDGETS:-0}"
 ANDROID_BUDGET_ROUTE_MS="${ANDROID_BUDGET_ROUTE_MS:-15000}"
 ANDROID_BUDGET_DOCUMENT_OPEN_MS="${ANDROID_BUDGET_DOCUMENT_OPEN_MS:-15000}"
 ANDROID_BUDGET_ACTION_LABELS_MS="${ANDROID_BUDGET_ACTION_LABELS_MS:-15000}"
+ANDROID_BUDGET_WIDGET_ACTION_MS="${ANDROID_BUDGET_WIDGET_ACTION_MS:-20000}"
 ANDROID_BUDGET_FOLD_TOGGLE_MS="${ANDROID_BUDGET_FOLD_TOGGLE_MS:-20000}"
 ANDROID_BUDGET_SCROLL_MS="${ANDROID_BUDGET_SCROLL_MS:-4000}"
 ANDROID_BUDGET_LAUNCH_BUNDLE_MS="${ANDROID_BUDGET_LAUNCH_BUNDLE_MS:-120000}"
@@ -319,6 +320,73 @@ verify_document_actions() {
     "Create new item"
 }
 
+tap_accessible_label() {
+  local label="$1"
+  local xml
+
+  xml="$(window_xml || true)"
+  if ! tap_xml_text "$xml" "$label"; then
+    log "Could not tap accessibility label or text: $label"
+    window_xml || true
+    return 1
+  fi
+  sleep 1
+}
+
+tap_label_and_wait() {
+  local label="$1"
+  local timeout_seconds="$2"
+  shift 2
+
+  tap_accessible_label "$label"
+  wait_for_all_text "$timeout_seconds" "$@"
+}
+
+close_document_dialog() {
+  local xml
+
+  xml="$(window_xml || true)"
+  if grep -Fq "Close document dialog" <<<"$xml"; then
+    tap_xml_text "$xml" "Close document dialog" || true
+  else
+    adb_cmd shell input keyevent KEYCODE_BACK || true
+  fi
+  wait_for_text 30 "More document actions"
+}
+
+capture_widget_dialog() {
+  local metric_name="$1"
+  local open_label="$2"
+  local screenshot_name="$3"
+  shift 3
+
+  measure_step "$metric_name" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_label_and_wait "$open_label" 30 "$@"
+  capture "$screenshot_name" "$@"
+  measure_step "${metric_name}_close" "$ANDROID_BUDGET_WIDGET_ACTION_MS" close_document_dialog
+}
+
+verify_document_widgets() {
+  measure_step "document_select_item_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_label_and_wait "Select document item" 30 "Copy selected item"
+  capture "03-document-node-selected" "Copy selected item"
+
+  measure_step "document_copy_item_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_accessible_label "Copy selected item"
+
+  measure_step "document_overflow_menu_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_label_and_wait "More document actions" 30 "Edit source"
+  capture "04-document-overflow-menu" "Edit source"
+  measure_step "document_edit_lane_open_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_label_and_wait "Edit source" 30 "Edit document source" "Save" "Cancel"
+  capture "05-document-edit-source" "Edit document source" "Save" "Cancel"
+  measure_step "document_edit_lane_cancel_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_label_and_wait "Cancel" 30 "More document actions"
+
+  capture_widget_dialog "document_paste_menu_ms" "Paste item" "06-document-paste-menu" "Paste item" "Above" "Under" "Below"
+  capture_widget_dialog "document_move_menu_ms" "Move selected item" "07-document-move-menu" "Move item" "Promote" "Demote"
+  capture_widget_dialog "document_schedule_menu_ms" "Schedule item" "08-document-schedule-menu" "Schedule" "Today" "Tomorrow"
+  capture_widget_dialog "document_deadline_menu_ms" "Set item deadline" "09-document-deadline-menu" "Deadline" "Today" "Tomorrow"
+  capture_widget_dialog "document_priority_menu_ms" "Set item priority" "10-document-priority-menu" "Priority" "A" "B" "C"
+  capture_widget_dialog "document_state_menu_ms" "Change item state" "11-document-state-menu" "State" "TODO" "NEXT" "DONE"
+  capture_widget_dialog "document_add_menu_ms" "Create new item" "12-document-add-menu" "Add item" "Above" "Under" "Below"
+  capture_widget_dialog "document_refile_menu_ms" "Archive or refile item" "13-document-refile-menu" "Archive here"
+}
+
 toggle_first_fold_control() {
   local xml
 
@@ -439,21 +507,22 @@ capture "01-library-loaded" "Local Org"
 measure_step "document_open_ms" "$ANDROID_BUDGET_DOCUMENT_OPEN_MS" open_first_document
 if [[ "$ANDROID_STRICT_DOCUMENT_ASSERTIONS" == "1" ]]; then
   measure_step "document_action_labels_ms" "$ANDROID_BUDGET_ACTION_LABELS_MS" verify_document_actions
-  measure_step "document_fold_toggle_ms" "$ANDROID_BUDGET_FOLD_TOGGLE_MS" toggle_first_fold_control
 fi
 capture "02-document-opened" "open app workflow"
 if [[ "$ANDROID_STRICT_DOCUMENT_ASSERTIONS" == "1" ]]; then
+  verify_document_widgets
+  measure_step "document_fold_toggle_ms" "$ANDROID_BUDGET_FOLD_TOGGLE_MS" toggle_first_fold_control
   measure_step "document_scroll_ms" "$ANDROID_BUDGET_SCROLL_MS" scroll_document_once
 fi
 
 measure_step "open_agenda_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route "agenda"
-capture "03-agenda" "Morning habit"
+capture "14-agenda" "Morning habit"
 
 measure_step "open_habits_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route "habits"
-capture "04-habits" "Morning habit"
+capture "15-habits" "Morning habit"
 
 measure_step "open_roam_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route "roam"
-capture "05-roam-graph" "Roam Nodes" "Knowledge Graph"
+capture "16-roam-graph" "Roam Nodes" "Knowledge Graph"
 
 write_metrics
 log "Screenshots ready"
