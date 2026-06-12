@@ -77,6 +77,122 @@ type ChecklistItem = {
   lineStart: number;
 };
 
+type DocumentActionIcon =
+  | "cut"
+  | "copy"
+  | "paste"
+  | "move"
+  | "overflow"
+  | "archive"
+  | "calendar"
+  | "deadline"
+  | "priority"
+  | "state"
+  | "add";
+
+function GraphicalActionIcon({ name }: { name: DocumentActionIcon }) {
+  if (name === "cut") {
+    return (
+      <View style={styles.cutIcon}>
+        <View style={[styles.cutBlade, styles.cutBladeLeft]} />
+        <View style={[styles.cutBlade, styles.cutBladeRight]} />
+        <View style={[styles.cutHandle, styles.cutHandleLeft]} />
+        <View style={[styles.cutHandle, styles.cutHandleRight]} />
+      </View>
+    );
+  }
+  if (name === "copy") {
+    return (
+      <View style={styles.copyIcon}>
+        <View style={[styles.copyIconSquare, styles.copyIconBack]} />
+        <View style={[styles.copyIconSquare, styles.copyIconFront]} />
+      </View>
+    );
+  }
+  if (name === "paste") {
+    return (
+      <View style={styles.clipboardIcon}>
+        <View style={styles.clipboardClip} />
+        <View style={styles.clipboardLine} />
+        <View style={[styles.clipboardLine, styles.clipboardLineShort]} />
+      </View>
+    );
+  }
+  if (name === "move") {
+    return (
+      <View style={styles.moveIcon}>
+        <View style={[styles.moveArrowHead, styles.moveArrowUp]} />
+        <View style={styles.moveStem} />
+        <View style={[styles.moveArrowHead, styles.moveArrowDown]} />
+      </View>
+    );
+  }
+  if (name === "overflow") {
+    return (
+      <View style={styles.overflowIcon}>
+        <View style={styles.overflowDot} />
+        <View style={styles.overflowDot} />
+        <View style={styles.overflowDot} />
+      </View>
+    );
+  }
+  if (name === "archive") {
+    return (
+      <View style={styles.archiveIcon}>
+        <View style={styles.archiveLid} />
+        <View style={styles.archiveArrowStem} />
+        <View style={styles.archiveArrowHead} />
+      </View>
+    );
+  }
+  if (name === "calendar") {
+    return (
+      <View style={styles.calendarIcon}>
+        <View style={styles.calendarHeader} />
+        <View style={styles.calendarGrid}>
+          <View style={styles.calendarDot} />
+          <View style={styles.calendarDot} />
+          <View style={styles.calendarDot} />
+          <View style={styles.calendarDot} />
+        </View>
+      </View>
+    );
+  }
+  if (name === "deadline") {
+    return (
+      <View style={styles.alarmIcon}>
+        <View style={[styles.alarmBell, styles.alarmBellLeft]} />
+        <View style={[styles.alarmBell, styles.alarmBellRight]} />
+        <View style={styles.alarmFace}>
+          <View style={styles.alarmHourHand} />
+          <View style={styles.alarmMinuteHand} />
+        </View>
+      </View>
+    );
+  }
+  if (name === "priority") {
+    return (
+      <View style={styles.priorityIcon}>
+        <View style={styles.priorityPole} />
+        <View style={styles.priorityFlag} />
+      </View>
+    );
+  }
+  if (name === "state") {
+    return (
+      <View style={styles.stateIcon}>
+        <View style={styles.stateCheck} />
+      </View>
+    );
+  }
+  return (
+    <View style={styles.addIcon}>
+      <View style={styles.addVertical} />
+      <View style={styles.addHorizontal} />
+    </View>
+  );
+}
+
 const PREVIEW_LOAD_CONCURRENCY = 4;
 const PREVIEW_LOAD_LIMIT = 24;
 const PREVIEW_LOAD_TIMEOUT_MS = 5000;
@@ -1358,17 +1474,40 @@ export default function LibraryScreen() {
                 <Text style={styles.editorSubtitle}>{interactionStatus}</Text>
               )}
             </View>
-            <TouchableOpacity style={styles.documentIconButton}>
-              <Text style={styles.documentIconText}>✂</Text>
+            <TouchableOpacity
+              style={styles.documentIconButton}
+              accessibilityLabel="Cut selected item"
+              testID="document-action-cut"
+            >
+              <GraphicalActionIcon name="cut" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.documentIconButton}>
-              <Text style={styles.documentIconText}>□</Text>
+            <TouchableOpacity
+              style={styles.documentIconButton}
+              accessibilityLabel="Copy selected item"
+              testID="document-action-copy"
+            >
+              <GraphicalActionIcon name="copy" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.documentIconButton}>
-              <Text style={styles.documentIconText}>↕</Text>
+            <TouchableOpacity
+              style={styles.documentIconButton}
+              accessibilityLabel="Paste item"
+              testID="document-action-paste"
+            >
+              <GraphicalActionIcon name="paste" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.documentIconButton}>
-              <Text style={styles.documentIconText}>⋮</Text>
+            <TouchableOpacity
+              style={styles.documentIconButton}
+              accessibilityLabel="Move selected item"
+              testID="document-action-move"
+            >
+              <GraphicalActionIcon name="move" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.documentIconButton}
+              accessibilityLabel="More document actions"
+              testID="document-action-overflow"
+            >
+              <GraphicalActionIcon name="overflow" />
             </TouchableOpacity>
           </View>
 
@@ -1403,23 +1542,47 @@ export default function LibraryScreen() {
           </ScrollView>
 
           <View style={styles.orgBottomToolbar}>
-            <TouchableOpacity style={styles.orgBottomTool}>
-              <Text style={styles.orgBottomToolText}>▣</Text>
+            <TouchableOpacity
+              style={styles.orgBottomTool}
+              accessibilityLabel="Archive or refile item"
+              testID="document-bottom-archive"
+            >
+              <GraphicalActionIcon name="archive" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.orgBottomTool}>
-              <Text style={styles.orgBottomToolText}>▣</Text>
+            <TouchableOpacity
+              style={styles.orgBottomTool}
+              accessibilityLabel="Schedule item"
+              testID="document-bottom-schedule"
+            >
+              <GraphicalActionIcon name="calendar" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.orgBottomTool}>
-              <Text style={styles.orgBottomToolText}>◷</Text>
+            <TouchableOpacity
+              style={styles.orgBottomTool}
+              accessibilityLabel="Set item deadline"
+              testID="document-bottom-deadline"
+            >
+              <GraphicalActionIcon name="deadline" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.orgBottomTool}>
-              <Text style={styles.orgBottomToolText}>⚑</Text>
+            <TouchableOpacity
+              style={styles.orgBottomTool}
+              accessibilityLabel="Set item priority"
+              testID="document-bottom-priority"
+            >
+              <GraphicalActionIcon name="priority" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.orgBottomTool}>
-              <Text style={styles.orgBottomToolText}>✓</Text>
+            <TouchableOpacity
+              style={styles.orgBottomTool}
+              accessibilityLabel="Change item state"
+              testID="document-bottom-state"
+            >
+              <GraphicalActionIcon name="state" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.orgBottomTool}>
-              <Text style={styles.orgBottomToolText}>＋</Text>
+            <TouchableOpacity
+              style={styles.orgBottomTool}
+              accessibilityLabel="Create new item"
+              testID="document-bottom-add"
+            >
+              <GraphicalActionIcon name="add" />
             </TouchableOpacity>
           </View>
         </View>
@@ -1888,6 +2051,291 @@ const styles = StyleSheet.create({
     fontSize: 22,
     lineHeight: 26,
     fontWeight: "700",
+  },
+  cutIcon: {
+    width: 26,
+    height: 26,
+    position: "relative",
+  },
+  cutBlade: {
+    position: "absolute",
+    left: 11,
+    top: 2,
+    width: 3,
+    height: 17,
+    borderRadius: 2,
+    backgroundColor: "#343843",
+  },
+  cutBladeLeft: { transform: [{ rotate: "45deg" }] },
+  cutBladeRight: { transform: [{ rotate: "-45deg" }] },
+  cutHandle: {
+    position: "absolute",
+    bottom: 1,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: "#343843",
+  },
+  cutHandleLeft: { left: 3 },
+  cutHandleRight: { right: 3 },
+  copyIcon: {
+    width: 27,
+    height: 27,
+    position: "relative",
+  },
+  copyIconSquare: {
+    position: "absolute",
+    width: 16,
+    height: 16,
+    borderRadius: 3,
+    borderWidth: 2,
+    borderColor: "#343843",
+    backgroundColor: "#ECECF6",
+  },
+  copyIconBack: { left: 4, top: 4, opacity: 0.72 },
+  copyIconFront: { left: 9, top: 9 },
+  clipboardIcon: {
+    width: 23,
+    height: 27,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: "#343843",
+    alignItems: "center",
+    paddingTop: 8,
+    gap: 4,
+  },
+  clipboardClip: {
+    position: "absolute",
+    top: -4,
+    width: 12,
+    height: 7,
+    borderRadius: 3,
+    borderWidth: 2,
+    borderColor: "#343843",
+    backgroundColor: "#ECECF6",
+  },
+  clipboardLine: {
+    width: 13,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: "#343843",
+  },
+  clipboardLineShort: { width: 9 },
+  moveIcon: {
+    width: 26,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  moveArrowHead: {
+    position: "absolute",
+    width: 0,
+    height: 0,
+    borderLeftWidth: 5,
+    borderRightWidth: 5,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+  },
+  moveArrowUp: {
+    top: 1,
+    borderBottomWidth: 7,
+    borderBottomColor: "#343843",
+  },
+  moveArrowDown: {
+    bottom: 1,
+    borderTopWidth: 7,
+    borderTopColor: "#343843",
+  },
+  moveStem: {
+    width: 3,
+    height: 16,
+    borderRadius: 2,
+    backgroundColor: "#343843",
+  },
+  overflowIcon: {
+    width: 24,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+  },
+  overflowDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "#343843",
+  },
+  archiveIcon: {
+    width: 27,
+    height: 24,
+    borderRadius: 3,
+    borderWidth: 2,
+    borderTopWidth: 0,
+    borderColor: "#30343F",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+  },
+  archiveLid: {
+    position: "absolute",
+    top: -5,
+    width: 29,
+    height: 7,
+    borderRadius: 2,
+    borderWidth: 2,
+    borderColor: "#30343F",
+    backgroundColor: "#ECECF6",
+  },
+  archiveArrowStem: {
+    width: 3,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: "#30343F",
+    marginTop: 1,
+  },
+  archiveArrowHead: {
+    width: 9,
+    height: 9,
+    borderRightWidth: 3,
+    borderBottomWidth: 3,
+    borderColor: "#30343F",
+    transform: [{ rotate: "45deg" }],
+    marginTop: -7,
+  },
+  calendarIcon: {
+    width: 27,
+    height: 27,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: "#30343F",
+    overflow: "hidden",
+  },
+  calendarHeader: {
+    height: 7,
+    backgroundColor: "#30343F",
+  },
+  calendarGrid: {
+    flex: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignContent: "center",
+    justifyContent: "center",
+    gap: 4,
+    padding: 4,
+  },
+  calendarDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#30343F",
+  },
+  alarmIcon: {
+    width: 29,
+    height: 29,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    position: "relative",
+  },
+  alarmBell: {
+    position: "absolute",
+    top: 1,
+    width: 9,
+    height: 6,
+    borderRadius: 4,
+    backgroundColor: "#30343F",
+  },
+  alarmBellLeft: { left: 3, transform: [{ rotate: "-25deg" }] },
+  alarmBellRight: { right: 3, transform: [{ rotate: "25deg" }] },
+  alarmFace: {
+    width: 23,
+    height: 23,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: "#30343F",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  alarmHourHand: {
+    position: "absolute",
+    width: 2,
+    height: 7,
+    borderRadius: 1,
+    backgroundColor: "#30343F",
+    top: 5,
+  },
+  alarmMinuteHand: {
+    position: "absolute",
+    width: 7,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: "#30343F",
+    left: 10,
+    top: 11,
+  },
+  priorityIcon: {
+    width: 25,
+    height: 27,
+    position: "relative",
+  },
+  priorityPole: {
+    position: "absolute",
+    left: 5,
+    top: 2,
+    width: 3,
+    height: 23,
+    borderRadius: 2,
+    backgroundColor: "#30343F",
+  },
+  priorityFlag: {
+    position: "absolute",
+    left: 8,
+    top: 3,
+    width: 14,
+    height: 11,
+    borderTopRightRadius: 3,
+    borderBottomRightRadius: 3,
+    backgroundColor: "#30343F",
+  },
+  stateIcon: {
+    width: 27,
+    height: 27,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "#30343F",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stateCheck: {
+    width: 13,
+    height: 7,
+    borderLeftWidth: 3,
+    borderBottomWidth: 3,
+    borderColor: "#30343F",
+    transform: [{ rotate: "-45deg" }],
+    marginTop: -2,
+  },
+  addIcon: {
+    width: 27,
+    height: 27,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  addVertical: {
+    position: "absolute",
+    width: 3,
+    height: 21,
+    borderRadius: 2,
+    backgroundColor: "#30343F",
+  },
+  addHorizontal: {
+    position: "absolute",
+    width: 21,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#30343F",
   },
   backButton: {
     paddingHorizontal: 12,

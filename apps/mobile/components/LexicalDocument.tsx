@@ -1,5 +1,5 @@
-import React from "react";
-import { StyleSheet, Text as RNText, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import { StyleSheet, Text as RNText, TouchableOpacity, View } from "react-native";
 
 import type { LexicalProjectionNode } from "../lib/orgLexicalModel";
 
@@ -32,6 +32,14 @@ function splitTodo(text: string, todo?: string | null) {
     return { todo: null, body: text };
   }
   return { todo: match[1], body: match[2] };
+}
+
+function documentNodeKey(node: LexicalProjectionNode, index: number): string {
+  return `${node.type}:${index}:${nodeText(node).slice(0, 24)}`;
+}
+
+function nodeDepth(node: LexicalProjectionNode): number {
+  return "depth" in node ? Math.max(node.depth, 1) : 1;
 }
 
 function markerFor(node: LexicalProjectionNode): string | null {
@@ -108,15 +116,56 @@ function renderRichText(node: LexicalProjectionNode) {
 }
 
 export function LexicalDocument({ value }: LexicalDocumentProps) {
+  const [foldedKeys, setFoldedKeys] = useState<Set<string>>(() => new Set());
+
+  const expandableKeys = useMemo(() => {
+    const keys = new Set<string>();
+    value.forEach((node, index) => {
+      const isStructural = node.type === "heading" || node.type === "list_item";
+      if (!isStructural) {
+        return;
+      }
+      const depth = nodeDepth(node);
+      const next = value[index + 1];
+      if (next && nodeDepth(next) > depth) {
+        keys.add(documentNodeKey(node, index));
+      }
+    });
+    return keys;
+  }, [value]);
+
+  const visibleRows = useMemo(() => {
+    const rows: Array<{ element: LexicalProjectionNode; index: number; key: string }> = [];
+    const foldedAncestors: Array<{ depth: number; key: string }> = [];
+
+    value.forEach((element, index) => {
+      const depth = nodeDepth(element);
+      while (foldedAncestors.length > 0 && foldedAncestors[foldedAncestors.length - 1].depth >= depth) {
+        foldedAncestors.pop();
+      }
+      if (foldedAncestors.length > 0) {
+        return;
+      }
+
+      const key = documentNodeKey(element, index);
+      rows.push({ element, index, key });
+      if (foldedKeys.has(key)) {
+        foldedAncestors.push({ depth, key });
+      }
+    });
+
+    return rows;
+  }, [foldedKeys, value]);
+
   return (
     <View style={styles.container} testID="lexical-org-document">
-      {value.map((element, index) => {
-        const text = nodeText(element);
-        const key = `${element.type}:${index}:${text.slice(0, 24)}`;
+      {visibleRows.map(({ element, index, key }) => {
         const marker = markerFor(element);
-        const depth = "depth" in element ? Math.max(element.depth, 1) : 1;
+        const depth = nodeDepth(element);
         const isStructural = element.type === "heading" || element.type === "list_item";
         const isCodeLike = element.type === "code_block" || element.type === "table";
+        const canFold = isStructural && expandableKeys.has(key);
+        const isFolded = foldedKeys.has(key);
 
         if (element.type === "horizontal_rule") {
           return <View key={key} style={styles.rule} />;
@@ -141,8 +190,26 @@ export function LexicalDocument({ value }: LexicalDocumentProps) {
             </View>
             <View style={styles.textColumn}>
               {renderRichText(element)}
-              {isStructural && element.type === "heading" ? (
-                <RNText style={styles.foldIndicator}>−</RNText>
+              {canFold ? (
+                <TouchableOpacity
+                  style={styles.foldButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={isFolded ? "Expand item" : "Collapse item"}
+                  testID={`document-fold-${index}`}
+                  onPress={() => {
+                    setFoldedKeys((current) => {
+                      const next = new Set(current);
+                      if (next.has(key)) {
+                        next.delete(key);
+                      } else {
+                        next.add(key);
+                      }
+                      return next;
+                    });
+                  }}
+                >
+                  <RNText style={styles.foldIndicator}>{isFolded ? "+" : "−"}</RNText>
+                </TouchableOpacity>
               ) : null}
             </View>
           </View>
@@ -253,13 +320,21 @@ const styles = StyleSheet.create({
   doneText: {
     color: "#A8ABB4",
   },
-  foldIndicator: {
+  foldButton: {
     position: "absolute",
-    right: 4,
-    top: 3,
+    right: 0,
+    top: 1,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  foldIndicator: {
     color: "#4B5563",
-    fontSize: 20,
+    fontSize: 22,
     lineHeight: 24,
+    fontWeight: "700",
   },
   rule: {
     height: 1,
