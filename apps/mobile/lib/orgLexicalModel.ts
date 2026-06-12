@@ -8,17 +8,19 @@ import {
 
 import type { LexicalNode } from '@postep/bridge';
 
+type ProjectionMetadata = { id?: string; lineStart?: number; lineEnd?: number; sourceRaw?: string };
+
 export type LexicalProjectionNode =
-  | { type: 'heading'; depth: number; children: Array<{ text: string }>; todo?: string | null; priority?: string | null; tags?: string[]; sourceRaw?: string }
-  | { type: 'list_item'; depth: number; ordered: boolean; checked: boolean | null; children: Array<{ text: string }>; marker?: string; sourceRaw?: string }
-  | { type: 'planning'; keyword?: string; children: Array<{ text: string }>; sourceRaw?: string }
-  | { type: 'property_drawer'; children: Array<{ text: string }>; properties?: Record<string, string>; sourceRaw?: string }
-  | { type: 'drawer'; name?: string; collapsed?: boolean; children: Array<{ text: string }>; sourceRaw?: string }
-  | { type: 'code_block'; language?: string | null; children: Array<{ text: string }>; sourceRaw?: string }
-  | { type: 'table'; rows: string[][]; children: Array<{ text: string }>; sourceRaw?: string }
-  | { type: 'directive'; keyword?: string; children: Array<{ text: string }>; sourceRaw?: string }
-  | { type: 'horizontal_rule'; children: Array<{ text: string }>; sourceRaw?: string }
-  | { type: 'paragraph'; children: Array<{ text: string }>; sourceRaw?: string };
+  | (ProjectionMetadata & { type: 'heading'; depth: number; children: Array<{ text: string }>; todo?: string | null; priority?: string | null; tags?: string[] })
+  | (ProjectionMetadata & { type: 'list_item'; depth: number; ordered: boolean; checked: boolean | null; children: Array<{ text: string }>; marker?: string })
+  | (ProjectionMetadata & { type: 'planning'; keyword?: string; children: Array<{ text: string }> })
+  | (ProjectionMetadata & { type: 'property_drawer'; children: Array<{ text: string }>; properties?: Record<string, string> })
+  | (ProjectionMetadata & { type: 'drawer'; name?: string; collapsed?: boolean; children: Array<{ text: string }> })
+  | (ProjectionMetadata & { type: 'code_block'; language?: string | null; children: Array<{ text: string }> })
+  | (ProjectionMetadata & { type: 'table'; rows: string[][]; children: Array<{ text: string }> })
+  | (ProjectionMetadata & { type: 'directive'; keyword?: string; children: Array<{ text: string }> })
+  | (ProjectionMetadata & { type: 'horizontal_rule'; children: Array<{ text: string }> })
+  | (ProjectionMetadata & { type: 'paragraph'; children: Array<{ text: string }> });
 
 export interface ConversionOptions {
   outlineOnly: boolean;
@@ -57,7 +59,13 @@ export function createOrgLexicalDocument(
   options: ConversionOptions
 ): OrgLexicalDocument {
   const projection = lexicalNodesToProjection(nodes, fallbackRaw, options);
-  const editor = createEditor({ namespace: 'PostepOrgModeDocument' });
+  const editor = createEditor({
+    namespace: 'PostepOrgModeDocument',
+    theme: {
+      paragraph: 'org-paragraph',
+      text: { bold: 'org-bold', italic: 'org-italic', code: 'org-code' }
+    }
+  });
   editor.update(() => {
     const root = $getRoot();
     root.clear();
@@ -229,7 +237,8 @@ export function convertOrgToLexical(raw: string, options: ConversionOptions): Le
     codeBuffer = [];
   };
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
     const trimmed = line.trim();
     if (/^#\+BEGIN_(SRC|EXAMPLE)/i.test(trimmed)) {
       pushParagraph();
@@ -262,16 +271,19 @@ export function convertOrgToLexical(raw: string, options: ConversionOptions): Le
       continue;
     }
 
-    const headingMatch = line.match(/^(\*+)\s+(.*)$/);
-    if (headingMatch) {
+    const parsedHeading = parseHeadingLine(line);
+    if (parsedHeading) {
       pushParagraph();
-      const depth = headingMatch[1].length;
-      const text = formatText(headingMatch[2], options.readerMode);
       nodes.push({
         type: 'heading',
-        depth,
+        depth: parsedHeading.depth,
+        todo: parsedHeading.todo,
+        priority: parsedHeading.priority,
+        tags: parsedHeading.tags,
         sourceRaw: line,
-        children: [{ text }]
+        lineStart: lineIndex,
+        lineEnd: lineIndex,
+        children: [{ text: formatText(parsedHeading.title, options.readerMode) }]
       } as LexicalProjectionNode);
       continue;
     }
@@ -286,6 +298,8 @@ export function convertOrgToLexical(raw: string, options: ConversionOptions): Le
         checked: listMatch[3] ? /x/i.test(listMatch[3]) : null,
         marker: listMatch[2],
         sourceRaw: line,
+        lineStart: lineIndex,
+        lineEnd: lineIndex,
         children: [{ text: formatText(listMatch[4], options.readerMode) }]
       } as LexicalProjectionNode);
       continue;
@@ -309,20 +323,23 @@ export function convertOrgToLexical(raw: string, options: ConversionOptions): Le
 }
 
 function lexicalNodeToProjection(node: LexicalNode, options: ConversionOptions): LexicalProjectionNode[] {
+  const metadata = { lineStart: node.line_start, lineEnd: node.line_end, sourceRaw: node.raw };
   if (node.type === 'heading') {
+    const parsed = parseHeadingLine(node.raw);
     return [{
+      ...metadata,
       type: 'heading',
-      depth: node.depth,
-      todo: node.todo_keyword ?? null,
-      priority: node.priority ?? null,
-      tags: node.tags,
-      sourceRaw: node.raw,
-      children: [{ text: formatText(node.text, options.readerMode) }]
+      depth: parsed?.depth ?? node.depth,
+      todo: parsed?.todo ?? node.todo_keyword ?? null,
+      priority: parsed?.priority ?? node.priority ?? null,
+      tags: parsed?.tags.length ? parsed.tags : node.tags,
+      children: [{ text: formatText(parsed?.title ?? node.text, options.readerMode) }]
     } as LexicalProjectionNode];
   }
   if (node.type === 'list_item') {
     return [
       {
+        ...metadata,
         type: 'list_item',
         depth: node.depth,
         ordered: node.ordered,
@@ -333,11 +350,12 @@ function lexicalNodeToProjection(node: LexicalNode, options: ConversionOptions):
     ];
   }
   if (node.type === 'planning') {
-    return [{ type: 'planning', keyword: node.keyword, sourceRaw: node.raw, children: [{ text: node.text }] } as LexicalProjectionNode];
+    return [{ ...metadata, type: 'planning', keyword: node.keyword, sourceRaw: node.raw, children: [{ text: node.text }] } as LexicalProjectionNode];
   }
   if (node.type === 'property_drawer') {
     return [
       {
+        ...metadata,
         type: 'property_drawer',
         properties: node.properties,
         sourceRaw: node.raw,
@@ -346,21 +364,21 @@ function lexicalNodeToProjection(node: LexicalNode, options: ConversionOptions):
     ];
   }
   if (node.type === 'drawer') {
-    return [{ type: 'drawer', name: node.name, collapsed: node.collapsed, sourceRaw: node.raw, children: [{ text: node.text }] } as LexicalProjectionNode];
+    return [{ ...metadata, type: 'drawer', name: node.name, collapsed: node.collapsed, sourceRaw: node.raw, children: [{ text: node.text }] } as LexicalProjectionNode];
   }
   if (node.type === 'code_block') {
-    return [{ type: 'code_block', language: node.language ?? null, sourceRaw: node.raw, children: [{ text: node.text }] } as LexicalProjectionNode];
+    return [{ ...metadata, type: 'code_block', language: node.language ?? null, sourceRaw: node.raw, children: [{ text: node.text }] } as LexicalProjectionNode];
   }
   if (node.type === 'table') {
-    return [{ type: 'table', rows: node.rows, sourceRaw: node.raw, children: [{ text: node.rows.map((row) => row.join(' | ')).join('\n') }] } as LexicalProjectionNode];
+    return [{ ...metadata, type: 'table', rows: node.rows, sourceRaw: node.raw, children: [{ text: node.rows.map((row) => row.join(' | ')).join('\n') }] } as LexicalProjectionNode];
   }
   if (node.type === 'directive') {
-    return [{ type: 'directive', keyword: node.keyword, sourceRaw: node.raw, children: [{ text: node.text }] } as LexicalProjectionNode];
+    return [{ ...metadata, type: 'directive', keyword: node.keyword, sourceRaw: node.raw, children: [{ text: node.text }] } as LexicalProjectionNode];
   }
   if (node.type === 'horizontal_rule') {
-    return [{ type: 'horizontal_rule', sourceRaw: node.raw, children: [{ text: '────' }] } as LexicalProjectionNode];
+    return [{ ...metadata, type: 'horizontal_rule', sourceRaw: node.raw, children: [{ text: '────' }] } as LexicalProjectionNode];
   }
-  return [{ type: 'paragraph', sourceRaw: node.raw, children: [{ text: formatText(node.text, options.readerMode) }] } as LexicalProjectionNode];
+  return [{ ...metadata, type: 'paragraph', sourceRaw: node.raw, children: [{ text: formatText(node.text, options.readerMode) }] } as LexicalProjectionNode];
 }
 
 function paragraphNode(text: string): LexicalProjectionNode {
@@ -405,18 +423,40 @@ function getDisplayText(node: LexicalNode, options: ConversionOptions): string {
   return formatText(node.text, options.readerMode);
 }
 
-function formatText(text: string, readerMode: boolean): string {
-  if (!readerMode) {
-    return text;
-  }
+function formatText(text: string, _readerMode: boolean): string {
   return text
-    .replace(/\*+/g, '')
-    .replace(/#\+\w+:.*$/g, '')
     .replace(/\[\[[^\]]+\]\[([^\]]*)\]\]/g, '$1')
     .replace(/\[\[([^\]]+)\]\]/g, '$1')
-    .replace(/:PROPERTIES:/g, '')
-    .replace(/:END:/g, '')
+    .replace(/(^|\s)([*/_=~])([^\s].*?[^\s]|[^\s])\2(?=\s|$|[.,;:!?])/g, '$1$3')
+    .replace(/\\([*_`~[\]])/g, '$1')
     .trim();
+}
+
+function parseHeadingLine(line: string): { depth: number; todo: string | null; priority: string | null; title: string; tags: string[] } | null {
+  const match = line.match(/^(\*+)\s+(.*)$/);
+  if (!match) {
+    return null;
+  }
+  let rest = match[2].trim();
+  let todo: string | null = null;
+  const todoMatch = rest.match(/^(TODO|NEXT|DONE|WAITING|CANCELLED|CANCELED|SOMEDAY)\s+/);
+  if (todoMatch) {
+    todo = todoMatch[1];
+    rest = rest.slice(todoMatch[0].length).trimStart();
+  }
+  let priority: string | null = null;
+  const priorityMatch = rest.match(/^\[#([A-Z0-9])\]\s*/);
+  if (priorityMatch) {
+    priority = priorityMatch[1];
+    rest = rest.slice(priorityMatch[0].length).trimStart();
+  }
+  let tags: string[] = [];
+  const tagMatch = rest.match(/\s+(:[A-Za-z0-9_@#%:-]+:)\s*$/);
+  if (tagMatch && tagMatch.index !== undefined) {
+    tags = tagMatch[1].split(':').filter(Boolean);
+    rest = rest.slice(0, tagMatch.index).trimEnd();
+  }
+  return { depth: match[1].length, todo, priority, title: rest, tags };
 }
 
 interface RawBlock {

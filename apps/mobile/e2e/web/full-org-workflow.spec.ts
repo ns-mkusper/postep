@@ -76,9 +76,80 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
     await expect(page.getByLabel(label)).toBeVisible();
   }
 
-  await measureResponsive('action button tap dispatch', responsivenessBudgetsMs.actionTap, async () => {
+  await expect(page.getByText('* TODO [#A] Morning habit 1 :habit:mobile:')).toHaveCount(0);
+  await expect(page.getByText('[[id:sample-10][Related sample 10]]')).toHaveCount(0);
+
+  await page.getByTestId('document-node-1').click();
+  await page.getByTestId('document-action-copy').click();
+
+  await measureResponsive('overflow action menu', responsivenessBudgetsMs.actionTap, async () => {
     await page.getByTestId('document-action-overflow').click();
+    await expect(page.getByTestId('document-action-menu')).toBeVisible();
   });
+  await expect(page.getByTestId('document-action-edit-source')).toBeVisible();
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.getByTestId('document-action-edit-source').click();
+  await expect(page.getByTestId('document-edit-lane')).toBeVisible();
+  const editBackground = await page.getByTestId('document-edit-source').evaluate((node) =>
+    window.getComputedStyle(node).backgroundColor
+  );
+  expect(editBackground).not.toBe('rgb(255, 255, 255)');
+  const sourceInput = page.getByTestId('document-edit-source');
+  await sourceInput.fill(`${await sourceInput.inputValue()}
+* Added from edit lane`);
+  await page.getByTestId('document-edit-cancel').click();
+  await expect(page.getByText('Added from edit lane')).toHaveCount(0);
+
+  await page.getByTestId('document-action-overflow').click();
+  await page.getByTestId('document-action-edit-source').click();
+  await sourceInput.fill(`${await sourceInput.inputValue()}
+* Added from edit lane`);
+  await page.getByTestId('document-edit-save').click();
+  await expect(page.getByText('Added from edit lane')).toBeVisible();
+
+  await page.getByTestId('document-action-paste').click();
+  await expect(page.getByTestId('document-paste-menu')).toBeVisible();
+  await page.getByTestId('document-paste-below').click();
+  await expect(page.getByText('Morning habit 1', { exact: true })).toHaveCount(2);
+
+  await page.getByTestId('document-action-move').click();
+  await expect(page.getByTestId('document-move-menu')).toBeVisible();
+  await page.getByTestId('document-move-demote').click();
+  await expect(page.getByTestId('document-move-menu')).toHaveCount(0);
+
+  await page.getByTestId('document-bottom-schedule').click();
+  await expect(page.getByTestId('document-schedule-menu')).toBeVisible();
+  await page.getByTestId('document-schedule-today').click();
+  await expect(page.getByText(/Scheduled \d{4}-|\d{4}-/).first()).toBeVisible();
+
+  await page.getByTestId('document-bottom-deadline').click();
+  await expect(page.getByTestId('document-deadline-menu')).toBeVisible();
+  await page.getByTestId('document-deadline-tomorrow').click();
+  await expect(page.getByText(/Deadline|Due|\d{4}-/).first()).toBeVisible();
+
+  await page.getByTestId('document-bottom-priority').click();
+  await expect(page.getByTestId('document-priority-menu')).toBeVisible();
+  await page.getByTestId('document-priority-b').click();
+  await expect(page.getByText('#B').first()).toBeVisible();
+
+  await page.getByTestId('document-bottom-state').click();
+  await expect(page.getByTestId('document-state-menu')).toBeVisible();
+  await page.getByTestId('document-state-next').click();
+  await expect(page.getByText('NEXT').first()).toBeVisible();
+
+  await page.getByTestId('document-bottom-add').click();
+  await expect(page.getByTestId('document-add-menu')).toBeVisible();
+  await page.getByTestId('document-add-title').fill('Action added heading');
+  await page.getByTestId('document-add-below').click();
+  await expect(page.getByText('Action added heading')).toBeVisible();
+
+  await page.getByTestId('document-bottom-archive').click();
+  await expect(page.getByTestId('document-refile-menu')).toBeVisible();
+  await page.getByTestId('document-refile-archive').click();
+  await expect(page.getByText('#ARCHIVE').first()).toBeVisible();
+
+  await page.getByTestId('document-action-cut').click();
+  await expect(page.getByText('Morning habit 1', { exact: true }).first()).toBeVisible();
 
   const firstFold = page.getByLabel('Collapse item').first();
   await expect(firstFold).toBeVisible();

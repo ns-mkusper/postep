@@ -1,12 +1,30 @@
 import React, { useMemo, useState } from "react";
-import { StyleSheet, Text as RNText, TouchableOpacity, View } from "react-native";
+import {
+  StyleSheet,
+  Text as RNText,
+  TouchableOpacity,
+  View,
+  useColorScheme,
+  type TextStyle,
+} from "react-native";
 
 import type { LexicalProjectionNode } from "../lib/orgLexicalModel";
 
 interface LexicalDocumentProps {
   value: LexicalProjectionNode[];
   readOnly?: boolean;
+  selectedKey?: string | null;
+  onSelectNode?: (node: LexicalProjectionNode, index: number, key: string) => void;
 }
+
+type ThemeTokens = ReturnType<typeof documentTheme>;
+
+type InlinePart =
+  | { type: "text"; text: string }
+  | { type: "link"; text: string }
+  | { type: "bold"; text: string }
+  | { type: "italic"; text: string }
+  | { type: "code"; text: string };
 
 function nodeText(node: LexicalProjectionNode): string {
   return node.children.map((child) => child.text).join("");
@@ -34,8 +52,34 @@ function splitTodo(text: string, todo?: string | null) {
   return { todo: match[1], body: match[2] };
 }
 
+function parseInline(text: string): InlinePart[] {
+  const parts: InlinePart[] = [];
+  const pattern = /\[\[[^\]]+\]\[([^\]]*)\]\]|\[\[([^\]]+)\]\]|([*_~=])([^\s].*?[^\s]|[^\s])\3/g;
+  let offset = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    if (match.index > offset) {
+      parts.push({ type: "text", text: text.slice(offset, match.index) });
+    }
+    if (match[1] || match[2]) {
+      parts.push({ type: "link", text: match[1] ?? match[2] });
+    } else {
+      const marker = match[3];
+      parts.push({
+        type: marker === "*" ? "bold" : marker === "/" ? "italic" : "code",
+        text: match[4],
+      });
+    }
+    offset = pattern.lastIndex;
+  }
+  if (offset < text.length) {
+    parts.push({ type: "text", text: text.slice(offset) });
+  }
+  return parts.length > 0 ? parts : [{ type: "text", text }];
+}
+
 function documentNodeKey(node: LexicalProjectionNode, index: number): string {
-  return `${node.type}:${index}:${nodeText(node).slice(0, 24)}`;
+  return `${node.type}:${node.lineStart ?? index}:${node.lineEnd ?? index}:${nodeText(node).slice(0, 24)}`;
 }
 
 function nodeDepth(node: LexicalProjectionNode): number {
@@ -53,31 +97,63 @@ function markerFor(node: LexicalProjectionNode): string | null {
     if (node.checked === false) {
       return "☐";
     }
-    return node.ordered ? "1." : "•";
+    return node.ordered ? node.marker ?? "1." : "•";
   }
   return null;
 }
 
-function textStyleFor(node: LexicalProjectionNode) {
+function textStyleFor(node: LexicalProjectionNode, theme: ThemeTokens): TextStyle[] {
+  const base = [styles.lineText, { color: theme.text }];
   if (node.type === "heading") {
-    return [styles.lineText, styles.headingText, node.depth > 1 && styles.subHeadingText];
+    return [
+      ...base,
+      styles.headingText,
+      { color: theme.heading },
+      node.depth > 1 ? styles.subHeadingText : undefined,
+    ].filter(Boolean) as TextStyle[];
   }
   if (node.type === "planning") {
-    return [styles.lineText, styles.planningText];
+    return [...base, styles.planningText, { color: theme.muted }];
   }
   if (node.type === "property_drawer" || node.type === "drawer" || node.type === "directive") {
-    return [styles.lineText, styles.metadataText];
+    return [...base, styles.metadataText, { color: theme.subtle }];
   }
   if (node.type === "code_block" || node.type === "table") {
-    return [styles.lineText, styles.monospaceText];
+    return [...base, styles.monospaceText, { color: theme.codeText }];
   }
   if (node.type === "list_item" && node.checked) {
-    return [styles.lineText, styles.doneText];
+    return [...base, styles.doneText, { color: theme.done }];
   }
-  return [styles.lineText];
+  return base;
 }
 
-function renderRichText(node: LexicalProjectionNode) {
+function renderInline(text: string, theme: ThemeTokens) {
+  return parseInline(text).map((part, index) => {
+    if (part.type === "link") {
+      return (
+        <RNText key={`${part.type}-${index}`} style={{ color: theme.link, textDecorationLine: "underline" }}>
+          {part.text}
+        </RNText>
+      );
+    }
+    if (part.type === "bold") {
+      return <RNText key={`${part.type}-${index}`} style={{ fontWeight: "800" }}>{part.text}</RNText>;
+    }
+    if (part.type === "italic") {
+      return <RNText key={`${part.type}-${index}`} style={{ fontStyle: "italic" }}>{part.text}</RNText>;
+    }
+    if (part.type === "code") {
+      return (
+        <RNText key={`${part.type}-${index}`} style={[styles.inlineCode, { color: theme.codeText, backgroundColor: theme.codeBg }]}>
+          {part.text}
+        </RNText>
+      );
+    }
+    return <RNText key={`${part.type}-${index}`}>{part.text}</RNText>;
+  });
+}
+
+function renderRichText(node: LexicalProjectionNode, theme: ThemeTokens) {
   if (node.type === "heading") {
     const text = nodeText(node);
     const { body, tags } = splitTags(text);
@@ -85,18 +161,18 @@ function renderRichText(node: LexicalProjectionNode) {
     const allTags = node.tags && node.tags.length > 0 ? node.tags : tags;
     const done = todoParts.todo === "DONE";
     return (
-      <RNText style={textStyleFor(node)}>
+      <RNText style={textStyleFor(node, theme)} testID={`document-heading-${node.lineStart ?? 0}`}>
         {todoParts.todo ? (
-          <RNText style={[styles.todoKeyword, done && styles.doneKeyword]}>
+          <RNText style={[styles.todoKeyword, { color: done ? theme.done : theme.todo }]}>
             {todoParts.todo}{" "}
           </RNText>
         ) : null}
         {node.priority ? (
-          <RNText style={styles.priorityText}>[#{node.priority}] </RNText>
+          <RNText style={[styles.priorityText, { color: theme.priority }]}>#{node.priority} </RNText>
         ) : null}
-        <RNText>{todoParts.body}</RNText>
+        {renderInline(todoParts.body, theme)}
         {allTags.length > 0 ? (
-          <RNText style={styles.tagsText}> {allTags.join(" ")}</RNText>
+          <RNText style={[styles.tagsText, { color: theme.tag }]}> {allTags.map((tag) => `#${tag}`).join(" ")}</RNText>
         ) : null}
       </RNText>
     );
@@ -104,18 +180,28 @@ function renderRichText(node: LexicalProjectionNode) {
 
   if (node.type === "planning") {
     return (
-      <RNText style={textStyleFor(node)}>
-        <RNText style={styles.planningKeyword}>{node.keyword}</RNText>
+      <RNText style={textStyleFor(node, theme)}>
+        <RNText style={[styles.planningKeyword, { color: theme.keyword }]}>{node.keyword}</RNText>
         {node.keyword ? ": " : ""}
-        {nodeText(node)}
+        {nodeText(node).replace(/[<>]/g, "")}
       </RNText>
     );
   }
 
-  return <RNText style={textStyleFor(node)}>{nodeText(node)}</RNText>;
+  if (node.type === "directive") {
+    return (
+      <RNText style={textStyleFor(node, theme)}>
+        {node.keyword ? `${node.keyword}: ` : ""}{renderInline(nodeText(node), theme)}
+      </RNText>
+    );
+  }
+
+  return <RNText style={textStyleFor(node, theme)}>{renderInline(nodeText(node), theme)}</RNText>;
 }
 
-export function LexicalDocument({ value }: LexicalDocumentProps) {
+export function LexicalDocument({ value, selectedKey, onSelectNode }: LexicalDocumentProps) {
+  const scheme = useColorScheme();
+  const theme = documentTheme(scheme === "dark");
   const [foldedKeys, setFoldedKeys] = useState<Set<string>>(() => new Set());
 
   const expandableKeys = useMemo(() => {
@@ -174,7 +260,7 @@ export function LexicalDocument({ value }: LexicalDocumentProps) {
   }, [foldedKeys, value]);
 
   return (
-    <View style={styles.container} testID="lexical-org-document">
+    <View style={[styles.container, { backgroundColor: theme.background }]} testID="lexical-org-document">
       {visibleRows.map(({ element, index, key }) => {
         const marker = markerFor(element);
         const depth = nodeDepth(element);
@@ -182,37 +268,45 @@ export function LexicalDocument({ value }: LexicalDocumentProps) {
         const isCodeLike = element.type === "code_block" || element.type === "table";
         const canFold = isStructural && expandableKeys.has(key);
         const isFolded = foldedKeys.has(key);
+        const selected = selectedKey === key;
 
         if (element.type === "horizontal_rule") {
-          return <View key={key} style={styles.rule} />;
+          return <View key={key} style={[styles.rule, { backgroundColor: theme.rule }]} />;
         }
 
         return (
-          <View
+          <TouchableOpacity
             key={key}
+            activeOpacity={0.78}
+            onPress={() => onSelectNode?.(element, index, key)}
+            testID={`document-node-${index}`}
+            accessibilityRole="button"
+            accessibilityLabel="Select document item"
             style={[
               styles.lineRow,
               { paddingLeft: Math.min((depth - 1) * 26, 104) },
-              isCodeLike && styles.codeRow,
+              isCodeLike && [styles.codeRow, { backgroundColor: theme.codeBg }],
+              selected && { backgroundColor: theme.selected, borderColor: theme.selectedBorder },
             ]}
           >
-            {depth > 1 && <View style={styles.indentGuide} />}
+            {depth > 1 && <View style={[styles.indentGuide, { backgroundColor: theme.indent }]} />}
             <View style={styles.markerColumn}>
               {marker ? (
-                <RNText style={[styles.marker, element.type === "heading" && styles.headingMarker]}>
+                <RNText style={[styles.marker, { color: theme.marker }, element.type === "heading" && styles.headingMarker]}>
                   {marker}
                 </RNText>
               ) : null}
             </View>
             <View style={styles.textColumn}>
-              {renderRichText(element)}
+              {renderRichText(element, theme)}
               {canFold ? (
                 <TouchableOpacity
-                  style={styles.foldButton}
+                  style={[styles.foldButton, { borderColor: theme.foldBorder, backgroundColor: theme.foldBg }]}
                   accessibilityRole="button"
                   accessibilityLabel={isFolded ? "Expand item" : "Collapse item"}
                   testID={`document-fold-${index}`}
-                  onPress={() => {
+                  onPress={(event) => {
+                    event.stopPropagation();
                     setFoldedKeys((current) => {
                       const next = new Set(current);
                       if (next.has(key)) {
@@ -224,28 +318,79 @@ export function LexicalDocument({ value }: LexicalDocumentProps) {
                     });
                   }}
                 >
-                  <RNText style={styles.foldIndicator}>{isFolded ? "+" : "−"}</RNText>
+                  <RNText style={[styles.foldIndicator, { color: theme.text }]}>{isFolded ? "+" : "−"}</RNText>
                 </TouchableOpacity>
               ) : null}
             </View>
-          </View>
+          </TouchableOpacity>
         );
       })}
     </View>
   );
 }
 
+function documentTheme(dark: boolean) {
+  return dark
+    ? {
+        background: "#101218",
+        text: "#ECEFF7",
+        heading: "#FFFFFF",
+        marker: "#D8E2FF",
+        muted: "#B4BDD1",
+        subtle: "#8F98AA",
+        todo: "#FF8A8A",
+        done: "#95D59F",
+        priority: "#FFBC70",
+        tag: "#9DB2FF",
+        keyword: "#C7D2FE",
+        link: "#8AB4FF",
+        codeBg: "#1C2230",
+        codeText: "#DBEAFE",
+        indent: "#343B4B",
+        rule: "#3D4658",
+        selected: "#1C2A44",
+        selectedBorder: "#6E8BE8",
+        foldBg: "#182033",
+        foldBorder: "#3F4A62",
+      }
+    : {
+        background: "#FAF9FD",
+        text: "#2E3038",
+        heading: "#252832",
+        marker: "#111827",
+        muted: "#6B7280",
+        subtle: "#8A8D98",
+        todo: "#C01818",
+        done: "#72A879",
+        priority: "#B15E10",
+        tag: "#646771",
+        keyword: "#4B5563",
+        link: "#315BD8",
+        codeBg: "#F1F1F7",
+        codeText: "#293041",
+        indent: "#DDDCE7",
+        rule: "#D5D5E2",
+        selected: "#EEF2FF",
+        selectedBorder: "#8398E8",
+        foldBg: "#FFFFFF",
+        foldBorder: "#DADBE8",
+      };
+}
+
 const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 16,
     paddingVertical: 18,
-    backgroundColor: "#FAF9FD",
   },
   lineRow: {
     minHeight: 31,
     flexDirection: "row",
     alignItems: "flex-start",
     position: "relative",
+    borderWidth: 1,
+    borderColor: "transparent",
+    borderRadius: 12,
+    paddingVertical: 2,
   },
   indentGuide: {
     position: "absolute",
@@ -253,7 +398,6 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: -2,
     width: 1,
-    backgroundColor: "#DDDCE7",
   },
   markerColumn: {
     width: 28,
@@ -263,7 +407,6 @@ const styles = StyleSheet.create({
     paddingTop: 4,
   },
   marker: {
-    color: "#111827",
     fontSize: 20,
     lineHeight: 22,
     fontWeight: "900",
@@ -277,84 +420,76 @@ const styles = StyleSheet.create({
     paddingRight: 28,
   },
   lineText: {
-    color: "#2E3038",
     fontSize: 20,
     lineHeight: 27,
     fontWeight: "400",
   },
   headingText: {
-    color: "#252832",
     fontSize: 21,
     lineHeight: 29,
-    fontWeight: "500",
+    fontWeight: "600",
   },
   subHeadingText: {
     fontSize: 20,
     lineHeight: 27,
   },
   todoKeyword: {
-    color: "#C01818",
     fontWeight: "900",
   },
-  doneKeyword: {
-    color: "#72A879",
-  },
   priorityText: {
-    color: "#B15E10",
     fontWeight: "800",
   },
   tagsText: {
-    color: "#646771",
     fontSize: 17,
   },
   planningText: {
-    color: "#6B7280",
     fontSize: 17,
     lineHeight: 23,
   },
   planningKeyword: {
     fontWeight: "800",
-    color: "#4B5563",
   },
   metadataText: {
-    color: "#8A8D98",
     fontSize: 16,
     lineHeight: 22,
   },
   monospaceText: {
-    color: "#30343F",
-    fontSize: 15,
-    lineHeight: 22,
     fontFamily: "monospace",
+    fontSize: 16,
+    lineHeight: 22,
   },
-  codeRow: {
-    backgroundColor: "#F1F1F7",
+  inlineCode: {
+    fontFamily: "monospace",
     borderRadius: 4,
-    marginVertical: 2,
-    paddingVertical: 5,
+    paddingHorizontal: 3,
   },
   doneText: {
-    color: "#A8ABB4",
+    textDecorationLine: "line-through",
+  },
+  codeRow: {
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginVertical: 4,
   },
   foldButton: {
     position: "absolute",
+    top: 2,
     right: 0,
-    top: 1,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1,
   },
   foldIndicator: {
-    color: "#4B5563",
-    fontSize: 22,
-    lineHeight: 24,
-    fontWeight: "700",
+    fontSize: 18,
+    lineHeight: 20,
+    fontWeight: "800",
   },
   rule: {
     height: 1,
-    marginVertical: 9,
-    backgroundColor: "#D6D6E0",
+    marginVertical: 14,
   },
 });
