@@ -18,26 +18,18 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
   await screenshot(page, '01-library-loaded');
 
   await page.getByText('E2E Org Sample 1', { exact: true }).click();
-  await expect(page.getByTestId('new-list-item-input')).toBeVisible();
+  await expect(page.getByTestId('back-to-notes')).toBeVisible();
+  await expect(page.getByTestId('lexical-org-document')).toBeVisible();
+  await expect(page.getByText('Morning habit 1', { exact: true })).toBeVisible();
   await expect(page.getByText('open app workflow 1')).toBeVisible();
   await expect(page.getByText('render org blocks 1')).toBeVisible();
-  await screenshot(page, '02-document-opened');
+  await screenshot(page, '02-document-org-rendered');
 
-  const moveButton = page.getByTestId('block-move-down-2').first();
-  if (await moveButton.isVisible()) {
-    await moveButton.click();
-  }
-
-  const editButton = page.getByTestId('block-edit-2').first();
-  if (await editButton.isVisible()) {
-    await editButton.click();
-    const editor = page.getByTestId('block-editor');
-    await expect(editor).toBeVisible();
-    await editor.fill('* TODO [#A] Morning habit 1 edited :habit:daily:');
-    await page.getByTestId('block-save').click();
-    await expect(page.getByText('Morning habit 1 edited')).toBeVisible();
-    await screenshot(page, '03-document-edited');
-  }
+  await page.getByTestId('document-scroll').evaluate((node) => {
+    node.scrollTo({ top: 360 });
+  });
+  await expect(page.getByText('Agenda item 1', { exact: true })).toBeVisible();
+  await screenshot(page, '03-document-org-scrolled');
 
   await page.goto('/agenda');
   await expect(page.getByTestId('agenda-screen')).toBeVisible();
@@ -85,6 +77,7 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
 
   await page.getByTestId('roam-open-selected-note').click();
   await expect(page.getByTestId('back-to-notes')).toBeVisible();
+  await expect(page.getByTestId('lexical-org-document')).toBeVisible();
   await expect(page.getByText('open app workflow 10')).toBeVisible();
   await screenshot(page, '09-note-opened-from-roam');
 

@@ -1,16 +1,24 @@
+import type { EditorState, LexicalEditor } from 'lexical';
+import {
+  $createParagraphNode,
+  $createTextNode,
+  $getRoot,
+  createEditor
+} from 'lexical';
+
 import type { LexicalNode } from '@postep/bridge';
 
 export type LexicalProjectionNode =
-  | { type: 'heading'; depth: number; children: Array<{ text: string }> }
-  | { type: 'list_item'; depth: number; ordered: boolean; checked: boolean | null; children: Array<{ text: string }> }
-  | { type: 'planning'; children: Array<{ text: string }> }
-  | { type: 'property_drawer'; children: Array<{ text: string }> }
-  | { type: 'drawer'; children: Array<{ text: string }> }
-  | { type: 'code_block'; language?: string | null; children: Array<{ text: string }> }
-  | { type: 'table'; rows: string[][]; children: Array<{ text: string }> }
-  | { type: 'directive'; children: Array<{ text: string }> }
-  | { type: 'horizontal_rule'; children: Array<{ text: string }> }
-  | { type: 'paragraph'; children: Array<{ text: string }> };
+  | { type: 'heading'; depth: number; children: Array<{ text: string }>; todo?: string | null; priority?: string | null; tags?: string[]; sourceRaw?: string }
+  | { type: 'list_item'; depth: number; ordered: boolean; checked: boolean | null; children: Array<{ text: string }>; marker?: string; sourceRaw?: string }
+  | { type: 'planning'; keyword?: string; children: Array<{ text: string }>; sourceRaw?: string }
+  | { type: 'property_drawer'; children: Array<{ text: string }>; properties?: Record<string, string>; sourceRaw?: string }
+  | { type: 'drawer'; name?: string; collapsed?: boolean; children: Array<{ text: string }>; sourceRaw?: string }
+  | { type: 'code_block'; language?: string | null; children: Array<{ text: string }>; sourceRaw?: string }
+  | { type: 'table'; rows: string[][]; children: Array<{ text: string }>; sourceRaw?: string }
+  | { type: 'directive'; keyword?: string; children: Array<{ text: string }>; sourceRaw?: string }
+  | { type: 'horizontal_rule'; children: Array<{ text: string }>; sourceRaw?: string }
+  | { type: 'paragraph'; children: Array<{ text: string }>; sourceRaw?: string };
 
 export interface ConversionOptions {
   outlineOnly: boolean;
@@ -25,6 +33,12 @@ export interface OrgBlockViewModel {
   rawText: string;
 }
 
+export interface OrgLexicalDocument {
+  editor: LexicalEditor;
+  editorState: EditorState;
+  projection: LexicalProjectionNode[];
+}
+
 export interface InteractionMetric {
   name: string;
   elapsedMs: number;
@@ -36,6 +50,70 @@ export const INTERACTION_BUDGET_MS = {
   lexicalProjection: 12,
   agendaRefresh: 50
 } as const;
+
+export function createOrgLexicalDocument(
+  nodes: LexicalNode[],
+  fallbackRaw: string,
+  options: ConversionOptions
+): OrgLexicalDocument {
+  const projection = lexicalNodesToProjection(nodes, fallbackRaw, options);
+  const editor = createEditor({ namespace: 'PostepOrgModeDocument' });
+  editor.update(() => {
+    const root = $getRoot();
+    root.clear();
+    for (const node of projection) {
+      const paragraph = $createParagraphNode();
+      paragraph.append($createTextNode(orgProjectionPlainText(node)));
+      root.append(paragraph);
+    }
+  }, { discrete: true });
+  const editorState = editor.getEditorState();
+
+  return { editor, editorState, projection };
+}
+
+export function orgProjectionPlainText(node: LexicalProjectionNode): string {
+  const text = node.children.map((child) => child.text).join('');
+  if (node.sourceRaw && !node.sourceRaw.includes('\n')) {
+    return node.sourceRaw;
+  }
+  if (node.type === 'heading') {
+    const stars = '*'.repeat(Math.max(node.depth, 1));
+    const todo = node.todo ? `${node.todo} ` : '';
+    const priority = node.priority ? `[#${node.priority}] ` : '';
+    const tags = node.tags && node.tags.length > 0 ? ` :${node.tags.join(':')}:` : '';
+    return `${stars} ${todo}${priority}${text}${tags}`;
+  }
+  if (node.type === 'list_item') {
+    const marker = node.marker ?? (node.ordered ? '1.' : '-');
+    const checkbox = node.checked === null ? '' : node.checked ? '[X] ' : '[ ] ';
+    return `${'  '.repeat(Math.max(node.depth - 1, 0))}${marker} ${checkbox}${text}`;
+  }
+  if (node.type === 'planning') {
+    return node.keyword ? `${node.keyword}: ${text}` : text;
+  }
+  if (node.type === 'directive') {
+    return node.keyword ? `#+${node.keyword}: ${text}` : text;
+  }
+  if (node.type === 'property_drawer') {
+    const properties = node.properties ?? {};
+    const body = Object.entries(properties).map(([key, value]) => `:${key}: ${value}`).join('\n');
+    return body ? `:PROPERTIES:\n${body}\n:END:` : text;
+  }
+  if (node.type === 'drawer') {
+    return node.name ? `:${node.name}:\n${text}\n:END:` : text;
+  }
+  if (node.type === 'code_block') {
+    return `#+BEGIN_SRC${node.language ? ` ${node.language}` : ''}\n${text}\n#+END_SRC`;
+  }
+  if (node.type === 'table') {
+    return node.rows.map((row) => `| ${row.join(' | ')} |`).join('\n');
+  }
+  if (node.type === 'horizontal_rule') {
+    return '-----';
+  }
+  return text;
+}
 
 export function lexicalNodesToProjection(
   nodes: LexicalNode[],
@@ -192,6 +270,7 @@ export function convertOrgToLexical(raw: string, options: ConversionOptions): Le
       nodes.push({
         type: 'heading',
         depth,
+        sourceRaw: line,
         children: [{ text }]
       } as LexicalProjectionNode);
       continue;
@@ -205,6 +284,8 @@ export function convertOrgToLexical(raw: string, options: ConversionOptions): Le
         depth: Math.floor(listMatch[1].length / 2) + 1,
         ordered: /\d/.test(listMatch[2]),
         checked: listMatch[3] ? /x/i.test(listMatch[3]) : null,
+        marker: listMatch[2],
+        sourceRaw: line,
         children: [{ text: formatText(listMatch[4], options.readerMode) }]
       } as LexicalProjectionNode);
       continue;
@@ -229,10 +310,15 @@ export function convertOrgToLexical(raw: string, options: ConversionOptions): Le
 
 function lexicalNodeToProjection(node: LexicalNode, options: ConversionOptions): LexicalProjectionNode[] {
   if (node.type === 'heading') {
-    const prefix = [node.todo_keyword, node.priority ? `[#${node.priority}]` : null].filter(Boolean).join(' ');
-    const tags = node.tags.length > 0 ? ` :${node.tags.join(':')}:` : '';
-    const text = formatText(`${prefix ? `${prefix} ` : ''}${node.text}${tags}`, options.readerMode);
-    return [{ type: 'heading', depth: node.depth, children: [{ text }] } as LexicalProjectionNode];
+    return [{
+      type: 'heading',
+      depth: node.depth,
+      todo: node.todo_keyword ?? null,
+      priority: node.priority ?? null,
+      tags: node.tags,
+      sourceRaw: node.raw,
+      children: [{ text: formatText(node.text, options.readerMode) }]
+    } as LexicalProjectionNode];
   }
   if (node.type === 'list_item') {
     return [
@@ -241,37 +327,40 @@ function lexicalNodeToProjection(node: LexicalNode, options: ConversionOptions):
         depth: node.depth,
         ordered: node.ordered,
         checked: node.checked ?? null,
+        sourceRaw: node.raw,
         children: [{ text: formatText(node.text, options.readerMode) }]
       } as LexicalProjectionNode
     ];
   }
   if (node.type === 'planning') {
-    return [{ type: 'planning', children: [{ text: `${node.keyword}: ${node.text}` }] } as LexicalProjectionNode];
+    return [{ type: 'planning', keyword: node.keyword, sourceRaw: node.raw, children: [{ text: node.text }] } as LexicalProjectionNode];
   }
   if (node.type === 'property_drawer') {
     return [
       {
         type: 'property_drawer',
+        properties: node.properties,
+        sourceRaw: node.raw,
         children: [{ text: Object.entries(node.properties).map(([key, value]) => `${key}: ${value}`).join(' · ') }]
       } as LexicalProjectionNode
     ];
   }
   if (node.type === 'drawer') {
-    return [{ type: 'drawer', children: [{ text: `${node.name}: ${node.text}` }] } as LexicalProjectionNode];
+    return [{ type: 'drawer', name: node.name, collapsed: node.collapsed, sourceRaw: node.raw, children: [{ text: node.text }] } as LexicalProjectionNode];
   }
   if (node.type === 'code_block') {
-    return [{ type: 'code_block', language: node.language ?? null, children: [{ text: node.text }] } as LexicalProjectionNode];
+    return [{ type: 'code_block', language: node.language ?? null, sourceRaw: node.raw, children: [{ text: node.text }] } as LexicalProjectionNode];
   }
   if (node.type === 'table') {
-    return [{ type: 'table', rows: node.rows, children: [{ text: node.rows.map((row) => row.join(' | ')).join('\n') }] } as LexicalProjectionNode];
+    return [{ type: 'table', rows: node.rows, sourceRaw: node.raw, children: [{ text: node.rows.map((row) => row.join(' | ')).join('\n') }] } as LexicalProjectionNode];
   }
   if (node.type === 'directive') {
-    return [{ type: 'directive', children: [{ text: `#+${node.keyword}: ${node.text}` }] } as LexicalProjectionNode];
+    return [{ type: 'directive', keyword: node.keyword, sourceRaw: node.raw, children: [{ text: node.text }] } as LexicalProjectionNode];
   }
   if (node.type === 'horizontal_rule') {
-    return [{ type: 'horizontal_rule', children: [{ text: '────' }] } as LexicalProjectionNode];
+    return [{ type: 'horizontal_rule', sourceRaw: node.raw, children: [{ text: '────' }] } as LexicalProjectionNode];
   }
-  return [{ type: 'paragraph', children: [{ text: formatText(node.text, options.readerMode) }] } as LexicalProjectionNode];
+  return [{ type: 'paragraph', sourceRaw: node.raw, children: [{ text: formatText(node.text, options.readerMode) }] } as LexicalProjectionNode];
 }
 
 function paragraphNode(text: string): LexicalProjectionNode {
