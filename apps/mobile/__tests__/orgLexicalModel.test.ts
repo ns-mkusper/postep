@@ -6,8 +6,10 @@ import type { LexicalNode } from '@postep/bridge';
 import {
   INTERACTION_BUDGET_MS,
   createBlockViewModels,
+  createOrgLexicalDocument,
   moveRawBlock,
   lexicalNodesToProjection,
+  orgProjectionPlainText,
   updateRawBlock
 } from '../lib/orgLexicalModel';
 
@@ -124,5 +126,85 @@ describe('org UI interaction model with 10 local org samples', () => {
     );
     assert.ok(projection.length >= 50);
     assert.ok(elapsedMs <= INTERACTION_BUDGET_MS.lexicalProjection, `projection took ${elapsedMs}ms`);
+  });
+
+  it('builds full Lexical document projections with org editor metadata in budget', () => {
+    const nodes: LexicalNode[] = [
+      {
+        type: 'heading',
+        depth: 1,
+        text: 'Morning habit :habit:daily:',
+        raw: '* TODO [#A] Morning habit :habit:daily:',
+        line_start: 0,
+        line_end: 0,
+        todo_keyword: 'TODO',
+        priority: 'A',
+        tags: ['habit', 'daily']
+      },
+      {
+        type: 'planning',
+        keyword: 'SCHEDULED',
+        text: '<2026-06-12 Fri 06:30 +1d>',
+        raw: 'SCHEDULED: <2026-06-12 Fri 06:30 +1d>',
+        line_start: 1,
+        line_end: 1
+      },
+      {
+        type: 'property_drawer',
+        properties: { STYLE: 'habit', EFFORT: '0:05' },
+        raw: ':PROPERTIES:\n:STYLE: habit\n:EFFORT: 0:05\n:END:',
+        line_start: 2,
+        line_end: 5
+      },
+      {
+        type: 'list_item',
+        depth: 2,
+        ordered: false,
+        checked: false,
+        text: 'open app workflow',
+        raw: '  - [ ] open app workflow',
+        line_start: 6,
+        line_end: 6
+      },
+      {
+        type: 'table',
+        rows: [['Metric', 'Budget'], ['Fold', 'responsive']],
+        raw: '| Metric | Budget |\n| Fold | responsive |',
+        line_start: 7,
+        line_end: 8
+      },
+      {
+        type: 'code_block',
+        language: 'shell',
+        text: 'echo responsive',
+        raw: '#+BEGIN_SRC shell\necho responsive\n#+END_SRC',
+        line_start: 9,
+        line_end: 11
+      }
+    ];
+
+    const { value: document, elapsedMs } = timed(() =>
+      createOrgLexicalDocument(nodes, samples[0], { outlineOnly: false, readerMode: true })
+    );
+
+    assert.ok(elapsedMs <= INTERACTION_BUDGET_MS.lexicalProjection, `document creation took ${elapsedMs}ms`);
+    assert.equal(document.projection.length, nodes.length);
+    const heading = document.projection[0];
+    assert.equal(heading.type, 'heading');
+    if (heading.type !== 'heading') {
+      assert.fail('expected heading projection');
+    }
+    assert.equal(heading.todo, 'TODO');
+    assert.equal(heading.priority, 'A');
+    assert.deepEqual(heading.tags, ['habit', 'daily']);
+    assert.equal(orgProjectionPlainText(heading), '* TODO [#A] Morning habit :habit:daily:');
+
+    const propertyDrawer = document.projection[2];
+    assert.equal(propertyDrawer.type, 'property_drawer');
+    if (propertyDrawer.type !== 'property_drawer') {
+      assert.fail('expected property drawer projection');
+    }
+    assert.deepEqual(propertyDrawer.properties, { STYLE: 'habit', EFFORT: '0:05' });
+    assert.match(orgProjectionPlainText(document.projection[4]), /^\| Metric \| Budget \|/);
   });
 });

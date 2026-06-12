@@ -127,7 +127,16 @@ export function LexicalDocument({ value }: LexicalDocumentProps) {
       }
       const depth = nodeDepth(node);
       const next = value[index + 1];
-      if (next && nodeDepth(next) > depth) {
+      if (!next) {
+        return;
+      }
+      const nextStartsPeerHeading =
+        node.type === "heading" &&
+        next.type === "heading" &&
+        nodeDepth(next) <= depth;
+      const nextIsNestedListItem =
+        node.type === "list_item" && nodeDepth(next) > depth;
+      if ((node.type === "heading" && !nextStartsPeerHeading) || nextIsNestedListItem) {
         keys.add(documentNodeKey(node, index));
       }
     });
@@ -136,11 +145,18 @@ export function LexicalDocument({ value }: LexicalDocumentProps) {
 
   const visibleRows = useMemo(() => {
     const rows: Array<{ element: LexicalProjectionNode; index: number; key: string }> = [];
-    const foldedAncestors: Array<{ depth: number; key: string }> = [];
+    const foldedAncestors: Array<{ depth: number; type: "heading" | "list_item" }> = [];
 
     value.forEach((element, index) => {
       const depth = nodeDepth(element);
-      while (foldedAncestors.length > 0 && foldedAncestors[foldedAncestors.length - 1].depth >= depth) {
+      while (foldedAncestors.length > 0) {
+        const ancestor = foldedAncestors[foldedAncestors.length - 1];
+        const reachedHeadingBoundary =
+          ancestor.type === "heading" && element.type === "heading" && depth <= ancestor.depth;
+        const reachedListBoundary = ancestor.type === "list_item" && depth <= ancestor.depth;
+        if (!reachedHeadingBoundary && !reachedListBoundary) {
+          break;
+        }
         foldedAncestors.pop();
       }
       if (foldedAncestors.length > 0) {
@@ -149,8 +165,8 @@ export function LexicalDocument({ value }: LexicalDocumentProps) {
 
       const key = documentNodeKey(element, index);
       rows.push({ element, index, key });
-      if (foldedKeys.has(key)) {
-        foldedAncestors.push({ depth, key });
+      if ((element.type === "heading" || element.type === "list_item") && foldedKeys.has(key)) {
+        foldedAncestors.push({ depth, type: element.type });
       }
     });
 
