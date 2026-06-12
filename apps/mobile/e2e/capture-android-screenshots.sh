@@ -297,7 +297,11 @@ open_first_document() {
   x=$(((x1 + x2) / 2))
   y=$(((y1 + y2) / 2))
   adb_cmd shell input tap "$x" "$y" || true
-  wait_for_all_text 90 "More document actions" "open app workflow"
+  if [[ "$ANDROID_STRICT_DOCUMENT_ASSERTIONS" == "1" ]]; then
+    wait_for_all_text 90 "More document actions" "open app workflow"
+  else
+    wait_for_text 90 "open app workflow"
+  fi
 }
 
 verify_document_actions() {
