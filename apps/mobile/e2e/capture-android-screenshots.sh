@@ -10,11 +10,67 @@ APK_PATH="${APK_PATH:-android/app/build/outputs/apk/debug/app-debug.apk}"
 METRO_PORT="${METRO_PORT:-8081}"
 EXPO_LOG="${EXPO_LOG:-/tmp/postep-expo-screenshots-${METRO_PORT}.log}"
 ADB_SERIAL="${ADB_SERIAL:-${ANDROID_SERIAL:-}}"
-mkdir -p "$SCREENSHOT_DIR"
-rm -f "$SCREENSHOT_DIR"/*.png
+METRICS_DIR="${METRICS_DIR:-$(dirname "$SCREENSHOT_DIR")/android-performance}"
+METRICS_JSON="${METRICS_JSON:-${METRICS_DIR}/metrics.json}"
+ANDROID_STRICT_DOCUMENT_ASSERTIONS="${ANDROID_STRICT_DOCUMENT_ASSERTIONS:-0}"
+ANDROID_ENFORCE_PERFORMANCE_BUDGETS="${ANDROID_ENFORCE_PERFORMANCE_BUDGETS:-0}"
+ANDROID_BUDGET_ROUTE_MS="${ANDROID_BUDGET_ROUTE_MS:-15000}"
+ANDROID_BUDGET_DOCUMENT_OPEN_MS="${ANDROID_BUDGET_DOCUMENT_OPEN_MS:-15000}"
+ANDROID_BUDGET_ACTION_LABELS_MS="${ANDROID_BUDGET_ACTION_LABELS_MS:-15000}"
+ANDROID_BUDGET_FOLD_TOGGLE_MS="${ANDROID_BUDGET_FOLD_TOGGLE_MS:-20000}"
+ANDROID_BUDGET_SCROLL_MS="${ANDROID_BUDGET_SCROLL_MS:-4000}"
+ANDROID_BUDGET_LAUNCH_BUNDLE_MS="${ANDROID_BUDGET_LAUNCH_BUNDLE_MS:-120000}"
+mkdir -p "$SCREENSHOT_DIR" "$METRICS_DIR"
+rm -f "$SCREENSHOT_DIR"/*.png "$METRICS_JSON"
+declare -a METRIC_NAMES=()
+declare -a METRIC_VALUES=()
 
 log() {
   printf '[android-screenshots] %s\n' "$*"
+}
+
+now_ms() {
+  date +%s%3N
+}
+
+record_metric() {
+  local name="$1"
+  local elapsed_ms="$2"
+  METRIC_NAMES+=("$name")
+  METRIC_VALUES+=("$elapsed_ms")
+  log "metric ${name}=${elapsed_ms}ms"
+}
+
+write_metrics() {
+  {
+    printf '{\n  "metrics": ['
+    for index in "${!METRIC_NAMES[@]}"; do
+      if (( index > 0 )); then
+        printf ','
+      fi
+      printf '\n    {"name":"%s","elapsedMs":%s}' "${METRIC_NAMES[$index]}" "${METRIC_VALUES[$index]}"
+    done
+    printf '\n  ]\n}\n'
+  } > "$METRICS_JSON"
+  log "Performance metrics ready: $METRICS_JSON"
+}
+
+measure_step() {
+  local name="$1"
+  local budget_ms="$2"
+  shift 2
+  local started_at
+  local finished_at
+  local elapsed_ms
+  started_at="$(now_ms)"
+  "$@"
+  finished_at="$(now_ms)"
+  elapsed_ms=$((finished_at - started_at))
+  record_metric "$name" "$elapsed_ms"
+  if [[ "$ANDROID_ENFORCE_PERFORMANCE_BUDGETS" == "1" && "$budget_ms" -gt 0 && "$elapsed_ms" -gt "$budget_ms" ]]; then
+    log "Performance budget exceeded for $name: ${elapsed_ms}ms > ${budget_ms}ms"
+    return 1
+  fi
 }
 
 adb_cmd() {
@@ -71,6 +127,7 @@ kill_metro_port() {
 }
 
 cleanup() {
+  write_metrics || true
   if [[ -n "${METRO_PID:-}" ]]; then
     kill_pid_and_children "$METRO_PID"
   fi
@@ -162,6 +219,37 @@ wait_for_text() {
   return 1
 }
 
+wait_for_all_text() {
+  local timeout_seconds="$1"
+  shift
+  local expected_texts=("$@")
+  local deadline=$((SECONDS + timeout_seconds))
+
+  while (( SECONDS < deadline )); do
+    local xml
+    local missing=0
+    xml="$(window_xml || true)"
+    if [[ -n "$xml" ]]; then
+      dismiss_system_dialogs
+      xml="$(window_xml || true)"
+      for text in "${expected_texts[@]}"; do
+        if ! grep -Fq "$text" <<<"$xml"; then
+          missing=1
+          break
+        fi
+      done
+      if [[ "$missing" == "0" ]]; then
+        return 0
+      fi
+    fi
+    sleep 2
+  done
+
+  log "Timed out waiting for all text: ${expected_texts[*]}"
+  window_xml || true
+  return 1
+}
+
 capture() {
   local name="$1"
   shift
@@ -183,6 +271,86 @@ open_route() {
     adb_cmd shell monkey -p "$APP_ID" 1 >/dev/null
   sleep 4
   dismiss_system_dialogs
+}
+
+open_first_document() {
+  local xml
+  local node
+  local bounds
+  local x1 y1 x2 y2 x y
+
+  xml="$(window_xml || true)"
+  node="$(grep -o '<node[^>]*content-desc="E2E Org Sample [^"]*"[^>]*>' <<<"$xml" | head -n 1 || true)"
+  if [[ -z "$node" ]]; then
+    log "Could not find first document card in accessibility tree"
+    window_xml || true
+    return 1
+  fi
+
+  bounds="$(sed -n 's/.*bounds="\[\([0-9][0-9]*\),\([0-9][0-9]*\)\]\[\([0-9][0-9]*\),\([0-9][0-9]*\)\]".*/\1 \2 \3 \4/p' <<<"$node")"
+  if [[ -z "$bounds" ]]; then
+    log "Could not read first document card bounds"
+    return 1
+  fi
+
+  read -r x1 y1 x2 y2 <<<"$bounds"
+  x=$(((x1 + x2) / 2))
+  y=$(((y1 + y2) / 2))
+  adb_cmd shell input tap "$x" "$y" || true
+  if [[ "$ANDROID_STRICT_DOCUMENT_ASSERTIONS" == "1" ]]; then
+    wait_for_all_text 90 "More document actions" "open app workflow"
+  else
+    wait_for_text 90 "open app workflow"
+  fi
+}
+
+verify_document_actions() {
+  wait_for_all_text 30 \
+    "Cut selected item" \
+    "Copy selected item" \
+    "Paste item" \
+    "Move selected item" \
+    "More document actions" \
+    "Archive or refile item" \
+    "Schedule item" \
+    "Set item deadline" \
+    "Set item priority" \
+    "Change item state" \
+    "Create new item"
+}
+
+toggle_first_fold_control() {
+  local xml
+
+  xml="$(window_xml || true)"
+  if ! grep -Fq "Collapse item" <<<"$xml"; then
+    log "Fold control did not expose Collapse item"
+    window_xml || true
+    return 1
+  fi
+
+  tap_xml_text "$xml" "Collapse item"
+  sleep 1
+  xml="$(window_xml || true)"
+  if ! grep -Fq "Expand item" <<<"$xml"; then
+    log "Fold collapse did not expose Expand item"
+    window_xml || true
+    return 1
+  fi
+
+  tap_xml_text "$xml" "Expand item"
+  sleep 1
+  xml="$(window_xml || true)"
+  if ! grep -Fq "Collapse item" <<<"$xml"; then
+    log "Fold expand did not restore Collapse item"
+    window_xml || true
+    return 1
+  fi
+}
+
+scroll_document_once() {
+  adb_cmd shell input swipe 540 1550 540 760 250 || true
+  sleep 1
 }
 
 install_apk() {
@@ -246,6 +414,7 @@ log "Installing debug APK: $APK_PATH"
 install_apk
 
 log "Launching app"
+launch_started_at="$(now_ms)"
 adb_cmd shell am start -W -n "$APP_ACTIVITY" >/dev/null || adb_cmd shell monkey -p "$APP_ID" 1 >/dev/null
 for _ in $(seq 1 150); do
   if grep -q "Android Bundled" "$EXPO_LOG"; then
@@ -255,22 +424,38 @@ for _ in $(seq 1 150); do
 done
 grep -q "Android Bundled" "$EXPO_LOG" || { cat "$EXPO_LOG"; exit 1; }
 sleep 8
+launch_finished_at="$(now_ms)"
+launch_elapsed_ms=$((launch_finished_at - launch_started_at))
+record_metric "launch_bundle_ms" "$launch_elapsed_ms"
+if [[ "$ANDROID_ENFORCE_PERFORMANCE_BUDGETS" == "1" && "$launch_elapsed_ms" -gt "$ANDROID_BUDGET_LAUNCH_BUNDLE_MS" ]]; then
+  log "Performance budget exceeded for launch_bundle_ms: ${launch_elapsed_ms}ms > ${ANDROID_BUDGET_LAUNCH_BUNDLE_MS}ms"
+  exit 1
+fi
 
-open_route "library"
+measure_step "open_library_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route "library"
 capture "01-library-loaded" "Local Org"
 
 # Open the first sample document from the library.
-adb_cmd shell input tap 260 245 || true
+measure_step "document_open_ms" "$ANDROID_BUDGET_DOCUMENT_OPEN_MS" open_first_document
+if [[ "$ANDROID_STRICT_DOCUMENT_ASSERTIONS" == "1" ]]; then
+  measure_step "document_action_labels_ms" "$ANDROID_BUDGET_ACTION_LABELS_MS" verify_document_actions
+  measure_step "document_fold_toggle_ms" "$ANDROID_BUDGET_FOLD_TOGGLE_MS" toggle_first_fold_control
+fi
 capture "02-document-opened" "open app workflow"
+if [[ "$ANDROID_STRICT_DOCUMENT_ASSERTIONS" == "1" ]]; then
+  measure_step "document_scroll_ms" "$ANDROID_BUDGET_SCROLL_MS" scroll_document_once
+fi
 
-open_route "agenda"
+measure_step "open_agenda_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route "agenda"
 capture "03-agenda" "Morning habit"
 
-open_route "habits"
+measure_step "open_habits_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route "habits"
 capture "04-habits" "Morning habit"
 
-open_route "roam"
+measure_step "open_roam_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route "roam"
 capture "05-roam-graph" "Roam Nodes" "Knowledge Graph"
 
+write_metrics
 log "Screenshots ready"
 ls -lh "$SCREENSHOT_DIR"
+ls -lh "$METRICS_JSON"

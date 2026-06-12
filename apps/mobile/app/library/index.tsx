@@ -30,6 +30,7 @@ import { useBridgeEvent } from "../../hooks/useBridgeEvent";
 import { useBridgeConfig } from "../../store/orgConfig";
 import {
   createBlockViewModels,
+  createOrgLexicalDocument,
   measureAsyncInteraction,
   measureInteraction,
   moveRawBlock,
@@ -75,6 +76,122 @@ type ChecklistItem = {
   checked: boolean;
   lineStart: number;
 };
+
+type DocumentActionIcon =
+  | "cut"
+  | "copy"
+  | "paste"
+  | "move"
+  | "overflow"
+  | "archive"
+  | "calendar"
+  | "deadline"
+  | "priority"
+  | "state"
+  | "add";
+
+function GraphicalActionIcon({ name }: { name: DocumentActionIcon }) {
+  if (name === "cut") {
+    return (
+      <View style={styles.cutIcon}>
+        <View style={[styles.cutBlade, styles.cutBladeLeft]} />
+        <View style={[styles.cutBlade, styles.cutBladeRight]} />
+        <View style={[styles.cutHandle, styles.cutHandleLeft]} />
+        <View style={[styles.cutHandle, styles.cutHandleRight]} />
+      </View>
+    );
+  }
+  if (name === "copy") {
+    return (
+      <View style={styles.copyIcon}>
+        <View style={[styles.copyIconSquare, styles.copyIconBack]} />
+        <View style={[styles.copyIconSquare, styles.copyIconFront]} />
+      </View>
+    );
+  }
+  if (name === "paste") {
+    return (
+      <View style={styles.clipboardIcon}>
+        <View style={styles.clipboardClip} />
+        <View style={styles.clipboardLine} />
+        <View style={[styles.clipboardLine, styles.clipboardLineShort]} />
+      </View>
+    );
+  }
+  if (name === "move") {
+    return (
+      <View style={styles.moveIcon}>
+        <View style={[styles.moveArrowHead, styles.moveArrowUp]} />
+        <View style={styles.moveStem} />
+        <View style={[styles.moveArrowHead, styles.moveArrowDown]} />
+      </View>
+    );
+  }
+  if (name === "overflow") {
+    return (
+      <View style={styles.overflowIcon}>
+        <View style={styles.overflowDot} />
+        <View style={styles.overflowDot} />
+        <View style={styles.overflowDot} />
+      </View>
+    );
+  }
+  if (name === "archive") {
+    return (
+      <View style={styles.archiveIcon}>
+        <View style={styles.archiveLid} />
+        <View style={styles.archiveArrowStem} />
+        <View style={styles.archiveArrowHead} />
+      </View>
+    );
+  }
+  if (name === "calendar") {
+    return (
+      <View style={styles.calendarIcon}>
+        <View style={styles.calendarHeader} />
+        <View style={styles.calendarGrid}>
+          <View style={styles.calendarDot} />
+          <View style={styles.calendarDot} />
+          <View style={styles.calendarDot} />
+          <View style={styles.calendarDot} />
+        </View>
+      </View>
+    );
+  }
+  if (name === "deadline") {
+    return (
+      <View style={styles.alarmIcon}>
+        <View style={[styles.alarmBell, styles.alarmBellLeft]} />
+        <View style={[styles.alarmBell, styles.alarmBellRight]} />
+        <View style={styles.alarmFace}>
+          <View style={styles.alarmHourHand} />
+          <View style={styles.alarmMinuteHand} />
+        </View>
+      </View>
+    );
+  }
+  if (name === "priority") {
+    return (
+      <View style={styles.priorityIcon}>
+        <View style={styles.priorityPole} />
+        <View style={styles.priorityFlag} />
+      </View>
+    );
+  }
+  if (name === "state") {
+    return (
+      <View style={styles.stateIcon}>
+        <View style={styles.stateCheck} />
+      </View>
+    );
+  }
+  return (
+    <View style={styles.addIcon}>
+      <View style={styles.addVertical} />
+      <View style={styles.addHorizontal} />
+    </View>
+  );
+}
 
 const PREVIEW_LOAD_CONCURRENCY = 4;
 const PREVIEW_LOAD_LIMIT = 24;
@@ -730,11 +847,26 @@ export default function LibraryScreen() {
       readerMode,
     ],
   );
-  const blocks = blockModel.value;
-  const visibleBlocks = useMemo(
-    () => blocks.filter(isVisibleDocumentBlock),
-    [blocks],
+  const lexicalDocument = useMemo(
+    () =>
+      measureInteraction("lexicalProjection", () =>
+        createOrgLexicalDocument(
+          documentQuery.data?.lexical ?? [],
+          documentQuery.data?.raw ?? "",
+          {
+            outlineOnly,
+            readerMode,
+          },
+        ),
+      ),
+    [
+      documentQuery.data?.raw,
+      documentQuery.data?.lexical,
+      outlineOnly,
+      readerMode,
+    ],
   );
+  const blocks = blockModel.value;
   const selectedName =
     documentsQuery.data?.find((doc) => doc.path === selectedPath)?.name ??
     "Org note";
@@ -753,11 +885,11 @@ export default function LibraryScreen() {
 
   useEffect(() => {
     const metric = selectedPath
-      ? blockModel.metric.elapsedMs
+      ? lexicalDocument.metric.elapsedMs
       : noteGrid.metric.elapsedMs;
     const label = selectedPath ? "Render model" : "Card grid";
     setInteractionStatus(`${label} ${metric.toFixed(2)}ms`);
-  }, [blockModel.metric.elapsedMs, noteGrid.metric.elapsedMs, selectedPath]);
+  }, [lexicalDocument.metric.elapsedMs, noteGrid.metric.elapsedMs, selectedPath]);
 
   const onRefreshDocuments = () => {
     queryClient.invalidateQueries({
@@ -1324,29 +1456,62 @@ export default function LibraryScreen() {
             <Text style={styles.fabText}>＋</Text>
           </TouchableOpacity>
         </View>
-      ) : checklistItems.length > 0 && documentQuery.data ? (
-        renderChecklistEditor()
       ) : (
         <View style={styles.editorScreen}>
           <View style={styles.documentTopBar}>
             <TouchableOpacity
               onPress={() => setSelectedPath(null)}
-              style={styles.backButton}
+              style={styles.iconButton}
               testID="back-to-notes"
             >
-              <Text style={styles.backButtonText}>‹ Notes</Text>
+              <Text style={styles.documentBackIcon}>‹</Text>
             </TouchableOpacity>
             <View style={styles.editorTitleBlock}>
               <Text style={styles.editorTitle} numberOfLines={1}>
-                {selectedName}
+                {selectedName.replace(/\.org$/i, "")}
               </Text>
               {interactionStatus && (
-                <Text style={styles.latencyText}>{interactionStatus}</Text>
+                <Text style={styles.editorSubtitle}>{interactionStatus}</Text>
               )}
             </View>
+            <TouchableOpacity
+              style={styles.documentIconButton}
+              accessibilityLabel="Cut selected item"
+              testID="document-action-cut"
+            >
+              <GraphicalActionIcon name="cut" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.documentIconButton}
+              accessibilityLabel="Copy selected item"
+              testID="document-action-copy"
+            >
+              <GraphicalActionIcon name="copy" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.documentIconButton}
+              accessibilityLabel="Paste item"
+              testID="document-action-paste"
+            >
+              <GraphicalActionIcon name="paste" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.documentIconButton}
+              accessibilityLabel="Move selected item"
+              testID="document-action-move"
+            >
+              <GraphicalActionIcon name="move" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.documentIconButton}
+              accessibilityLabel="More document actions"
+              testID="document-action-overflow"
+            >
+              <GraphicalActionIcon name="overflow" />
+            </TouchableOpacity>
           </View>
 
-          <View style={styles.switchRow}>
+          <View style={styles.documentModeBar}>
             <View style={styles.switchItem}>
               <Text style={styles.switchLabel}>Reader</Text>
               <Switch value={readerMode} onValueChange={setReaderMode} />
@@ -1355,112 +1520,71 @@ export default function LibraryScreen() {
               <Text style={styles.switchLabel}>Outline</Text>
               <Switch value={outlineOnly} onValueChange={setOutlineOnly} />
             </View>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => setShowDocument((v) => !v)}
-            >
-              <Text style={styles.actionButtonText}>
-                {showDocument ? "Hide" : "Show"}
-              </Text>
-            </TouchableOpacity>
           </View>
 
-          {showDocument && (
-            <FlatList
-              testID="document-scroll"
-              style={styles.documentScroll}
-              data={visibleBlocks}
-              keyExtractor={(block) => block.id}
-              contentContainerStyle={{ paddingBottom: 48 }}
-              ListHeaderComponent={() =>
-                documentQuery.isFetching ? (
-                  <ActivityIndicator
-                    style={{ marginVertical: 24 }}
-                    color="#AFC0FF"
-                  />
-                ) : null
-              }
-              ListEmptyComponent={() =>
-                !documentQuery.isFetching &&
-                (!documentQuery.data || blocks.length === 0) ? (
-                  <Text style={styles.emptyDocument}>
-                    Select an Org file to view its contents.
-                  </Text>
-                ) : null
-              }
-              renderItem={({ item: block }) => {
-                const isEditing = editingBlockId === block.id;
-                return (
-                  <View
-                    testID={`org-block-card-${block.node.type}-${block.node.line_start}`}
-                    style={[
-                      styles.blockCard,
-                      block.node.type === "heading" && styles.headingCard,
-                    ]}
-                  >
-                    <View style={styles.blockToolbar}>
-                      <Text style={styles.blockType}>
-                        {blockLabel(block.node)}
-                      </Text>
-                      <View style={styles.blockActions}>
-                        <TouchableOpacity
-                          testID={`block-move-up-${block.node.line_start}`}
-                          onPress={() => moveBlock(block, -1)}
-                          style={styles.smallAction}
-                        >
-                          <Text style={styles.smallActionText}>↑</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          testID={`block-move-down-${block.node.line_start}`}
-                          onPress={() => moveBlock(block, 1)}
-                          style={styles.smallAction}
-                        >
-                          <Text style={styles.smallActionText}>↓</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          testID={`block-edit-${block.node.line_start}`}
-                          onPress={() => startEditing(block)}
-                          style={styles.smallAction}
-                        >
-                          <Text style={styles.smallActionText}>Edit</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                    {isEditing ? (
-                      <View>
-                        <TextInput
-                          testID="block-editor"
-                          style={styles.blockEditor}
-                          value={draftRaw}
-                          onChangeText={setDraftRaw}
-                          multiline
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                        />
-                        <View style={styles.editActions}>
-                          <TouchableOpacity
-                            style={styles.cancelButton}
-                            onPress={() => setEditingBlockId(null)}
-                          >
-                            <Text style={styles.cancelText}>Cancel</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            testID="block-save"
-                            style={styles.saveButton}
-                            onPress={() => saveBlockEdit(block)}
-                          >
-                            <Text style={styles.saveText}>Save</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    ) : (
-                      renderOrgNode(block.node, block.projection)
-                    )}
-                  </View>
-                );
-              }}
-            />
-          )}
+          <ScrollView
+            testID="document-scroll"
+            style={styles.documentScroll}
+            contentContainerStyle={styles.orgDocumentContent}
+          >
+            {documentQuery.isFetching ? (
+              <ActivityIndicator
+                style={{ marginVertical: 24 }}
+                color="#5F6F85"
+              />
+            ) : documentQuery.data ? (
+              <LexicalDocument value={lexicalDocument.value.projection} />
+            ) : (
+              <Text style={styles.emptyDocument}>
+                Select an Org file to view its contents.
+              </Text>
+            )}
+          </ScrollView>
+
+          <View style={styles.orgBottomToolbar}>
+            <TouchableOpacity
+              style={styles.orgBottomTool}
+              accessibilityLabel="Archive or refile item"
+              testID="document-bottom-archive"
+            >
+              <GraphicalActionIcon name="archive" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.orgBottomTool}
+              accessibilityLabel="Schedule item"
+              testID="document-bottom-schedule"
+            >
+              <GraphicalActionIcon name="calendar" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.orgBottomTool}
+              accessibilityLabel="Set item deadline"
+              testID="document-bottom-deadline"
+            >
+              <GraphicalActionIcon name="deadline" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.orgBottomTool}
+              accessibilityLabel="Set item priority"
+              testID="document-bottom-priority"
+            >
+              <GraphicalActionIcon name="priority" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.orgBottomTool}
+              accessibilityLabel="Change item state"
+              testID="document-bottom-state"
+            >
+              <GraphicalActionIcon name="state" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.orgBottomTool}
+              accessibilityLabel="Create new item"
+              testID="document-bottom-add"
+            >
+              <GraphicalActionIcon name="add" />
+            </TouchableOpacity>
+          </View>
         </View>
       )}
     </View>
@@ -1897,16 +2021,321 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   bottomToolText: { color: "#D7DCD0", fontSize: 29, fontWeight: "800" },
-  editorScreen: { flex: 1, backgroundColor: "#071008" },
+  editorScreen: { flex: 1, backgroundColor: "#FAF9FD" },
   documentTopBar: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    minHeight: 68,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
     flexDirection: "row",
     alignItems: "center",
-    borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#2E3A2B",
-    gap: 12,
+    borderBottomColor: "#DADAE4",
+    backgroundColor: "#ECECF6",
+    gap: 8,
+  },
+  documentBackIcon: {
+    color: "#22252F",
+    fontSize: 38,
+    lineHeight: 42,
+    fontWeight: "300",
+  },
+  documentIconButton: {
+    width: 34,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+  },
+  documentIconText: {
+    color: "#343843",
+    fontSize: 22,
+    lineHeight: 26,
+    fontWeight: "700",
+  },
+  cutIcon: {
+    width: 26,
+    height: 26,
+    position: "relative",
+  },
+  cutBlade: {
+    position: "absolute",
+    left: 11,
+    top: 2,
+    width: 3,
+    height: 17,
+    borderRadius: 2,
+    backgroundColor: "#343843",
+  },
+  cutBladeLeft: { transform: [{ rotate: "45deg" }] },
+  cutBladeRight: { transform: [{ rotate: "-45deg" }] },
+  cutHandle: {
+    position: "absolute",
+    bottom: 1,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: "#343843",
+  },
+  cutHandleLeft: { left: 3 },
+  cutHandleRight: { right: 3 },
+  copyIcon: {
+    width: 27,
+    height: 27,
+    position: "relative",
+  },
+  copyIconSquare: {
+    position: "absolute",
+    width: 16,
+    height: 16,
+    borderRadius: 3,
+    borderWidth: 2,
+    borderColor: "#343843",
+    backgroundColor: "#ECECF6",
+  },
+  copyIconBack: { left: 4, top: 4, opacity: 0.72 },
+  copyIconFront: { left: 9, top: 9 },
+  clipboardIcon: {
+    width: 23,
+    height: 27,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: "#343843",
+    alignItems: "center",
+    paddingTop: 8,
+    gap: 4,
+  },
+  clipboardClip: {
+    position: "absolute",
+    top: -4,
+    width: 12,
+    height: 7,
+    borderRadius: 3,
+    borderWidth: 2,
+    borderColor: "#343843",
+    backgroundColor: "#ECECF6",
+  },
+  clipboardLine: {
+    width: 13,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: "#343843",
+  },
+  clipboardLineShort: { width: 9 },
+  moveIcon: {
+    width: 26,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  moveArrowHead: {
+    position: "absolute",
+    width: 0,
+    height: 0,
+    borderLeftWidth: 5,
+    borderRightWidth: 5,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+  },
+  moveArrowUp: {
+    top: 1,
+    borderBottomWidth: 7,
+    borderBottomColor: "#343843",
+  },
+  moveArrowDown: {
+    bottom: 1,
+    borderTopWidth: 7,
+    borderTopColor: "#343843",
+  },
+  moveStem: {
+    width: 3,
+    height: 16,
+    borderRadius: 2,
+    backgroundColor: "#343843",
+  },
+  overflowIcon: {
+    width: 24,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+  },
+  overflowDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "#343843",
+  },
+  archiveIcon: {
+    width: 27,
+    height: 24,
+    borderRadius: 3,
+    borderWidth: 2,
+    borderTopWidth: 0,
+    borderColor: "#30343F",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+  },
+  archiveLid: {
+    position: "absolute",
+    top: -5,
+    width: 29,
+    height: 7,
+    borderRadius: 2,
+    borderWidth: 2,
+    borderColor: "#30343F",
+    backgroundColor: "#ECECF6",
+  },
+  archiveArrowStem: {
+    width: 3,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: "#30343F",
+    marginTop: 1,
+  },
+  archiveArrowHead: {
+    width: 9,
+    height: 9,
+    borderRightWidth: 3,
+    borderBottomWidth: 3,
+    borderColor: "#30343F",
+    transform: [{ rotate: "45deg" }],
+    marginTop: -7,
+  },
+  calendarIcon: {
+    width: 27,
+    height: 27,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: "#30343F",
+    overflow: "hidden",
+  },
+  calendarHeader: {
+    height: 7,
+    backgroundColor: "#30343F",
+  },
+  calendarGrid: {
+    flex: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignContent: "center",
+    justifyContent: "center",
+    gap: 4,
+    padding: 4,
+  },
+  calendarDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#30343F",
+  },
+  alarmIcon: {
+    width: 29,
+    height: 29,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    position: "relative",
+  },
+  alarmBell: {
+    position: "absolute",
+    top: 1,
+    width: 9,
+    height: 6,
+    borderRadius: 4,
+    backgroundColor: "#30343F",
+  },
+  alarmBellLeft: { left: 3, transform: [{ rotate: "-25deg" }] },
+  alarmBellRight: { right: 3, transform: [{ rotate: "25deg" }] },
+  alarmFace: {
+    width: 23,
+    height: 23,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: "#30343F",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  alarmHourHand: {
+    position: "absolute",
+    width: 2,
+    height: 7,
+    borderRadius: 1,
+    backgroundColor: "#30343F",
+    top: 5,
+  },
+  alarmMinuteHand: {
+    position: "absolute",
+    width: 7,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: "#30343F",
+    left: 10,
+    top: 11,
+  },
+  priorityIcon: {
+    width: 25,
+    height: 27,
+    position: "relative",
+  },
+  priorityPole: {
+    position: "absolute",
+    left: 5,
+    top: 2,
+    width: 3,
+    height: 23,
+    borderRadius: 2,
+    backgroundColor: "#30343F",
+  },
+  priorityFlag: {
+    position: "absolute",
+    left: 8,
+    top: 3,
+    width: 14,
+    height: 11,
+    borderTopRightRadius: 3,
+    borderBottomRightRadius: 3,
+    backgroundColor: "#30343F",
+  },
+  stateIcon: {
+    width: 27,
+    height: 27,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "#30343F",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stateCheck: {
+    width: 13,
+    height: 7,
+    borderLeftWidth: 3,
+    borderBottomWidth: 3,
+    borderColor: "#30343F",
+    transform: [{ rotate: "-45deg" }],
+    marginTop: -2,
+  },
+  addIcon: {
+    width: 27,
+    height: 27,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  addVertical: {
+    position: "absolute",
+    width: 3,
+    height: 21,
+    borderRadius: 2,
+    backgroundColor: "#30343F",
+  },
+  addHorizontal: {
+    position: "absolute",
+    width: 21,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#30343F",
   },
   backButton: {
     paddingHorizontal: 12,
@@ -1917,8 +2346,9 @@ const styles = StyleSheet.create({
     borderColor: "#34402F",
   },
   backButtonText: { color: "#EEF3E8", fontSize: 17, fontWeight: "700" },
-  editorTitleBlock: { flex: 1 },
-  editorTitle: { color: "#F2F5EC", fontSize: 20, fontWeight: "800" },
+  editorTitleBlock: { flex: 1, minWidth: 0 },
+  editorTitle: { color: "#252832", fontSize: 20, fontWeight: "800" },
+  editorSubtitle: { color: "#6B7280", fontSize: 11, marginTop: 2 },
   switchRow: {
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -1929,7 +2359,18 @@ const styles = StyleSheet.create({
     borderBottomColor: "#2E3A2B",
   },
   switchItem: { flexDirection: "row", alignItems: "center", gap: 8 },
-  switchLabel: { color: "#D8DED2", fontSize: 16 },
+  switchLabel: { color: "#4B5563", fontSize: 16, fontWeight: "700" },
+  documentModeBar: {
+    minHeight: 54,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#DADAE4",
+    backgroundColor: "#FAF9FD",
+  },
   actionButton: {
     backgroundColor: "#22301E",
     paddingVertical: 10,
@@ -1940,7 +2381,42 @@ const styles = StyleSheet.create({
     borderColor: "#3A4634",
   },
   actionButtonText: { color: "#F0F4E8", fontWeight: "700", fontSize: 15 },
-  documentScroll: { flex: 1, backgroundColor: "#071008" },
+  documentScroll: { flex: 1, backgroundColor: "#FAF9FD" },
+  orgDocumentContent: {
+    flexGrow: 1,
+    paddingBottom: 110,
+    backgroundColor: "#FAF9FD",
+  },
+  orgBottomToolbar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    minHeight: 78,
+    paddingHorizontal: 24,
+    paddingTop: 10,
+    paddingBottom: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#ECECF6",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#DADAE4",
+  },
+  orgBottomTool: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  orgBottomToolText: {
+    color: "#30343F",
+    fontSize: 25,
+    lineHeight: 29,
+    fontWeight: "800",
+  },
   blocksContainer: { padding: 10 },
   blockCard: {
     backgroundColor: "#091108",

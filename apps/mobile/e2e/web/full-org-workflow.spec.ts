@@ -3,57 +3,128 @@ import { expect, test, type Page } from '@playwright/test';
 
 const screenshotDir = 'e2e-artifacts/screenshots';
 
+const responsivenessBudgetsMs = {
+  libraryLoad: 10_000,
+  documentOpen: 8_000,
+  foldToggle: 1_500,
+  scroll: 1_500,
+  actionTap: 750,
+  routeSwitch: 8_000,
+};
+
+async function measureResponsive<T>(label: string, budgetMs: number, action: () => Promise<T>): Promise<T> {
+  const startedAt = performance.now();
+  const result = await action();
+  const elapsedMs = performance.now() - startedAt;
+  expect(elapsedMs, `${label} took ${elapsedMs.toFixed(1)}ms`).toBeLessThanOrEqual(budgetMs);
+  return result;
+}
+
 async function screenshot(page: Page, name: string) {
   await mkdir(screenshotDir, { recursive: true });
   await page.screenshot({ path: `${screenshotDir}/${name}.png`, fullPage: true });
 }
 
 test('full launched org UI workflow against 10 E2E org files', async ({ page }) => {
-  await page.goto('/library');
-
-  await expect(page.getByTestId('library-search-input')).toBeVisible();
+  await measureResponsive('library route load', responsivenessBudgetsMs.libraryLoad, async () => {
+    await page.goto('/library');
+    await expect(page.getByTestId('library-search-input')).toBeVisible();
+  });
   await expect(page.getByTestId('org-library-title')).toHaveText('Local Org');
   await expect(page.getByText('10 notes')).toBeVisible();
   await expect(page.getByTestId('document-card-sample-01.org')).toBeVisible();
   await screenshot(page, '01-library-loaded');
 
-  await page.getByText('E2E Org Sample 1', { exact: true }).click();
-  await expect(page.getByTestId('new-list-item-input')).toBeVisible();
+  await measureResponsive('document open', responsivenessBudgetsMs.documentOpen, async () => {
+    await page.getByText('E2E Org Sample 1', { exact: true }).click();
+    await expect(page.getByTestId('back-to-notes')).toBeVisible();
+    await expect(page.getByTestId('lexical-org-document')).toBeVisible();
+  });
+  await expect(page.getByText('Morning habit 1', { exact: true })).toBeVisible();
   await expect(page.getByText('open app workflow 1')).toBeVisible();
   await expect(page.getByText('render org blocks 1')).toBeVisible();
-  await screenshot(page, '02-document-opened');
 
-  const moveButton = page.getByTestId('block-move-down-2').first();
-  if (await moveButton.isVisible()) {
-    await moveButton.click();
+  for (const actionId of [
+    'document-action-cut',
+    'document-action-copy',
+    'document-action-paste',
+    'document-action-move',
+    'document-action-overflow',
+    'document-bottom-archive',
+    'document-bottom-schedule',
+    'document-bottom-deadline',
+    'document-bottom-priority',
+    'document-bottom-state',
+    'document-bottom-add',
+  ]) {
+    await expect(page.getByTestId(actionId)).toBeVisible();
   }
 
-  const editButton = page.getByTestId('block-edit-2').first();
-  if (await editButton.isVisible()) {
-    await editButton.click();
-    const editor = page.getByTestId('block-editor');
-    await expect(editor).toBeVisible();
-    await editor.fill('* TODO [#A] Morning habit 1 edited :habit:daily:');
-    await page.getByTestId('block-save').click();
-    await expect(page.getByText('Morning habit 1 edited')).toBeVisible();
-    await screenshot(page, '03-document-edited');
+  for (const label of [
+    'Cut selected item',
+    'Copy selected item',
+    'Paste item',
+    'Move selected item',
+    'More document actions',
+    'Archive or refile item',
+    'Schedule item',
+    'Set item deadline',
+    'Set item priority',
+    'Change item state',
+    'Create new item',
+  ]) {
+    await expect(page.getByLabel(label)).toBeVisible();
   }
 
-  await page.goto('/agenda');
-  await expect(page.getByTestId('agenda-screen')).toBeVisible();
+  await measureResponsive('action button tap dispatch', responsivenessBudgetsMs.actionTap, async () => {
+    await page.getByTestId('document-action-overflow').click();
+  });
+
+  const firstFold = page.getByLabel('Collapse item').first();
+  await expect(firstFold).toBeVisible();
+  await expect(firstFold).toContainText('−');
+  await measureResponsive('fold collapse', responsivenessBudgetsMs.foldToggle, async () => {
+    await firstFold.click();
+    await expect(page.getByLabel('Expand item').first()).toContainText('+');
+    await expect(page.getByText('open app workflow 1')).toBeHidden();
+  });
+  await measureResponsive('fold expand', responsivenessBudgetsMs.foldToggle, async () => {
+    await page.getByLabel('Expand item').first().click();
+    await expect(page.getByLabel('Collapse item').first()).toContainText('−');
+    await expect(page.getByText('open app workflow 1')).toBeVisible();
+  });
+
+  await screenshot(page, '02-document-org-rendered');
+
+  await measureResponsive('document scroll', responsivenessBudgetsMs.scroll, async () => {
+    await page.getByTestId('document-scroll').evaluate((node) => {
+      node.scrollTo({ top: 360 });
+    });
+    await expect(page.getByText('Agenda item 1', { exact: true })).toBeVisible();
+  });
+  await screenshot(page, '03-document-org-scrolled');
+
+  await measureResponsive('agenda route load', responsivenessBudgetsMs.routeSwitch, async () => {
+    await page.goto('/agenda');
+    await expect(page.getByTestId('agenda-screen')).toBeVisible();
+  });
   await expect(page.getByText('Agenda item 1', { exact: true })).toBeVisible();
   await screenshot(page, '04-agenda-loaded');
 
-  await page.goto('/habits');
-  await expect(page.getByTestId('habits-list')).toBeVisible();
+  await measureResponsive('habits route load', responsivenessBudgetsMs.routeSwitch, async () => {
+    await page.goto('/habits');
+    await expect(page.getByTestId('habits-list')).toBeVisible();
+  });
   await expect(page.getByText('TODO Morning habit 1', { exact: true })).toBeVisible();
   await page.getByTestId('habit-title-input').fill('Hydrate');
   await page.getByTestId('habit-add-button').click();
   await expect(page.getByText('TODO Hydrate')).toBeVisible();
   await screenshot(page, '05-habit-added');
 
-  await page.goto('/roam');
-  await expect(page.getByTestId('roam-screen')).toBeVisible();
+  await measureResponsive('roam route load', responsivenessBudgetsMs.routeSwitch, async () => {
+    await page.goto('/roam');
+    await expect(page.getByTestId('roam-screen')).toBeVisible();
+  });
   await expect(page.getByTestId('roam-graph-mode')).toBeVisible();
   await expect(page.getByTestId('roam-selected-note')).toBeVisible();
   await page.getByTestId('roam-filter-linked').click();
@@ -85,6 +156,7 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
 
   await page.getByTestId('roam-open-selected-note').click();
   await expect(page.getByTestId('back-to-notes')).toBeVisible();
+  await expect(page.getByTestId('lexical-org-document')).toBeVisible();
   await expect(page.getByText('open app workflow 10')).toBeVisible();
   await screenshot(page, '09-note-opened-from-roam');
 
