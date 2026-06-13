@@ -482,42 +482,54 @@ verify_document_widgets() {
 
 toggle_first_fold_control() {
   local xml
+  local found
 
-  for _ in $(seq 1 3); do
+  found=0
+  for _ in $(seq 1 4); do
     dismiss_system_dialogs
     xml="$(window_xml || true)"
     if grep -Fq "Edit document source" <<<"$xml"; then
       close_document_editor || true
+      xml="$(window_xml || true)"
     fi
 
-    if wait_for_text 10 "Collapse item"; then
+    if grep -Fq "Collapse item" <<<"$xml"; then
+      found=1
       break
     fi
 
     adb_cmd shell input swipe 540 760 540 1550 250 || true
     sleep 1
   done
-  wait_for_text 30 "Collapse item"
 
-  for _ in $(seq 1 3); do
+  if [[ "$found" != "1" ]]; then
+    wait_for_text 8 "Collapse item"
+    xml="$(window_xml || true)"
+  fi
+
+  tap_xml_text "$xml" "Collapse item" || true
+  found=0
+  for _ in $(seq 1 6); do
     dismiss_system_dialogs
     xml="$(window_xml || true)"
-    if ! grep -Fq "Collapse item" <<<"$xml"; then
-      sleep 1
-      continue
-    fi
-
-    tap_xml_text "$xml" "Collapse item" || true
-    if wait_for_text 10 "Expand item"; then
-      dismiss_system_dialogs
-      xml="$(window_xml || true)"
+    if grep -Fq "Expand item" <<<"$xml"; then
       tap_xml_text "$xml" "Expand item" || true
-      wait_for_text 30 "Collapse item"
-      return 0
+      found=1
+      break
     fi
-
     sleep 1
   done
+
+  if [[ "$found" == "1" ]]; then
+    for _ in $(seq 1 6); do
+      dismiss_system_dialogs
+      xml="$(window_xml || true)"
+      if grep -Fq "Collapse item" <<<"$xml"; then
+        return 0
+      fi
+      sleep 1
+    done
+  fi
 
   log "Fold collapse did not expose Expand item"
   window_xml || true

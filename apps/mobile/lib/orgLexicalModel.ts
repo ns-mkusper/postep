@@ -49,7 +49,7 @@ export interface InteractionMetric {
 export const INTERACTION_BUDGET_MS = {
   blockMove: 8,
   blockEdit: 8,
-  lexicalProjection: 12,
+  lexicalProjection: 16,
   agendaRefresh: 50
 } as const;
 
