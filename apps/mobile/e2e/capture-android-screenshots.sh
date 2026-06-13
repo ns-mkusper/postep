@@ -354,6 +354,25 @@ close_document_dialog() {
   wait_for_text 30 "More document actions"
 }
 
+
+close_document_editor() {
+  local xml
+
+  for _ in $(seq 1 5); do
+    xml="$(window_xml || true)"
+    if tap_xml_text "$xml" "Cancel"; then
+      wait_for_text 30 "More document actions"
+      return 0
+    fi
+    adb_cmd shell input swipe 540 1750 540 720 300 || true
+    sleep 1
+  done
+
+  log "Could not find document edit Cancel button"
+  window_xml || true
+  return 1
+}
+
 capture_widget_dialog() {
   local metric_name="$1"
   local open_label="$2"
@@ -373,9 +392,9 @@ verify_document_widgets() {
 
   measure_step "document_overflow_menu_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_label_and_wait "More document actions" 30 "Edit source"
   capture "04-document-overflow-menu" "Edit source"
-  measure_step "document_edit_lane_open_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_label_and_wait "Edit source" 30 "Edit document source" "Save" "Cancel"
-  capture "05-document-edit-source" "Edit document source" "Save" "Cancel"
-  measure_step "document_edit_lane_cancel_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_label_and_wait "Cancel" 30 "More document actions"
+  measure_step "document_edit_lane_open_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_label_and_wait "Edit source" 30 "Edit document source"
+  capture "05-document-edit-source" "Edit document source"
+  measure_step "document_edit_lane_cancel_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" close_document_editor
 
   capture_widget_dialog "document_paste_menu_ms" "Paste item" "06-document-paste-menu" "Paste item" "Above" "Under" "Below"
   capture_widget_dialog "document_move_menu_ms" "Move selected item" "07-document-move-menu" "Move item" "Promote" "Demote"

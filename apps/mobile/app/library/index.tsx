@@ -1988,10 +1988,10 @@ export default function LibraryScreen() {
                     selectionColor={editTheme.selection}
                   />
                   <View style={styles.documentEditActions}>
-                    <TouchableOpacity style={styles.documentDialogButton} testID="document-edit-save" onPress={saveDocumentEdit}>
+                    <TouchableOpacity style={styles.documentDialogButton} testID="document-edit-save" accessibilityLabel="Save" onPress={saveDocumentEdit}>
                       <Text style={styles.documentDialogButtonText}>Save</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.documentDialogButtonSecondary} testID="document-edit-cancel" onPress={cancelDocumentEdit}>
+                    <TouchableOpacity style={styles.documentDialogButtonSecondary} testID="document-edit-cancel" accessibilityLabel="Cancel" onPress={cancelDocumentEdit}>
                       <Text style={styles.documentDialogButtonSecondaryText}>Cancel</Text>
                     </TouchableOpacity>
                   </View>
