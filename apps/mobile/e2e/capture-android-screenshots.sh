@@ -181,6 +181,15 @@ dismiss_system_dialogs() {
 
   for _ in $(seq 1 3); do
     xml="$(window_xml || true)"
+    if grep -Eiq "Console Warning|Console Error|Log [0-9]+ of [0-9]+|Component Stack" <<<"$xml"; then
+      log "Dismissing React Native LogBox before screenshot capture"
+      tap_xml_text "$xml" "Dismiss" || \
+        tap_xml_text "$xml" "Minimize" || \
+        adb_cmd shell input keyevent KEYCODE_ESCAPE || true
+      sleep 1
+      continue
+    fi
+
     if ! grep -Eiq "Pixel Launcher|Launcher3|nexuslauncher|isn.?t responding|Close app" <<<"$xml"; then
       return 0
     fi
@@ -345,6 +354,7 @@ tap_label_and_wait() {
 close_document_dialog() {
   local xml
 
+  dismiss_system_dialogs
   xml="$(window_xml || true)"
   if grep -Fq "Close document dialog" <<<"$xml"; then
     tap_xml_text "$xml" "Close document dialog" || true
@@ -352,8 +362,17 @@ close_document_dialog() {
     adb_cmd shell input keyevent KEYCODE_BACK || true
   fi
   wait_for_text 30 "More document actions"
+  sleep 1
+  dismiss_system_dialogs
 }
 
+wait_for_document_toolbar() {
+  local timeout_seconds="$1"
+  shift
+
+  dismiss_system_dialogs
+  wait_for_all_text "$timeout_seconds" "More document actions" "$@"
+}
 
 close_document_editor() {
   local xml
@@ -379,9 +398,11 @@ capture_widget_dialog() {
   local screenshot_name="$3"
   shift 3
 
+  wait_for_document_toolbar 30 "$open_label"
   measure_step "$metric_name" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_label_and_wait "$open_label" 30 "$@"
   capture "$screenshot_name" "$@"
   measure_step "${metric_name}_close" "$ANDROID_BUDGET_WIDGET_ACTION_MS" close_document_dialog
+  wait_for_document_toolbar 30 "$open_label"
 }
 
 verify_document_widgets() {
