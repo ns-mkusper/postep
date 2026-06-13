@@ -1,0 +1,82 @@
+{
+  "beforeDir": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-before",
+  "afterDir": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-after",
+  "diffDir": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-diff",
+  "compared": 5,
+  "missingBefore": [
+    "03-document-node-selected.png",
+    "04-document-overflow-menu.png",
+    "05-document-edit-source.png",
+    "06-document-paste-menu.png",
+    "07-document-move-menu.png",
+    "08-document-schedule-menu.png",
+    "09-document-deadline-menu.png",
+    "10-document-priority-menu.png",
+    "11-document-state-menu.png",
+    "12-document-add-menu.png",
+    "13-document-refile-menu.png"
+  ],
+  "missingAfter": [],
+  "results": [
+    {
+      "name": "01-library-loaded.png",
+      "before": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-before/01-library-loaded.png",
+      "after": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-after/01-library-loaded.png",
+      "diff": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-diff/01-library-loaded.diff.png",
+      "width": 1080,
+      "height": 2400,
+      "mismatchedPixels": 225183,
+      "totalPixels": 2592000,
+      "mismatchRatio": 0.08687615740740741,
+      "mismatchPercent": 8.688
+    },
+    {
+      "name": "02-document-opened.png",
+      "before": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-before/02-document-opened.png",
+      "after": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-after/02-document-opened.png",
+      "diff": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-diff/02-document-opened.diff.png",
+      "width": 1080,
+      "height": 2400,
+      "mismatchedPixels": 4375,
+      "totalPixels": 2592000,
+      "mismatchRatio": 0.0016878858024691357,
+      "mismatchPercent": 0.169
+    },
+    {
+      "name": "14-agenda.png",
+      "before": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-before/14-agenda.png",
+      "after": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-after/14-agenda.png",
+      "diff": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-diff/14-agenda.diff.png",
+      "width": 1080,
+      "height": 2400,
+      "mismatchedPixels": 0,
+      "totalPixels": 2592000,
+      "mismatchRatio": 0,
+      "mismatchPercent": 0
+    },
+    {
+      "name": "15-habits.png",
+      "before": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-before/15-habits.png",
+      "after": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-after/15-habits.png",
+      "diff": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-diff/15-habits.diff.png",
+      "width": 1080,
+      "height": 2400,
+      "mismatchedPixels": 0,
+      "totalPixels": 2592000,
+      "mismatchRatio": 0,
+      "mismatchPercent": 0
+    },
+    {
+      "name": "16-roam-graph.png",
+      "before": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-before/16-roam-graph.png",
+      "after": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-after/16-roam-graph.png",
+      "diff": "/home/runner/work/postep/postep/apps/mobile/e2e-artifacts/android-screenshots-diff/16-roam-graph.diff.png",
+      "width": 1080,
+      "height": 2400,
+      "mismatchedPixels": 0,
+      "totalPixels": 2592000,
+      "mismatchRatio": 0,
+      "mismatchPercent": 0
+    }
+  ]
+}
