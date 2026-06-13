@@ -1987,6 +1987,7 @@ export default function LibraryScreen() {
                     placeholder="Org source"
                     placeholderTextColor={editTheme.placeholder}
                     selectionColor={editTheme.selection}
+                    showSoftInputOnFocus={process.env.EXPO_PUBLIC_POSTEP_E2E === "1" ? false : undefined}
                   />
                   <View style={styles.documentEditActions}>
                     <TouchableOpacity style={styles.documentDialogButton} testID="document-edit-save" accessibilityLabel="Save" onPress={saveDocumentEdit}>
