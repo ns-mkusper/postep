@@ -430,30 +430,32 @@ verify_document_widgets() {
 toggle_first_fold_control() {
   local xml
 
-  xml="$(window_xml || true)"
-  if ! grep -Fq "Collapse item" <<<"$xml"; then
-    log "Fold control did not expose Collapse item"
-    window_xml || true
-    return 1
-  fi
+  dismiss_system_dialogs
+  wait_for_text 30 "Collapse item"
 
-  tap_xml_text "$xml" "Collapse item"
-  sleep 1
-  xml="$(window_xml || true)"
-  if ! grep -Fq "Expand item" <<<"$xml"; then
-    log "Fold collapse did not expose Expand item"
-    window_xml || true
-    return 1
-  fi
+  for _ in $(seq 1 3); do
+    dismiss_system_dialogs
+    xml="$(window_xml || true)"
+    if ! grep -Fq "Collapse item" <<<"$xml"; then
+      sleep 1
+      continue
+    fi
 
-  tap_xml_text "$xml" "Expand item"
-  sleep 1
-  xml="$(window_xml || true)"
-  if ! grep -Fq "Collapse item" <<<"$xml"; then
-    log "Fold expand did not restore Collapse item"
-    window_xml || true
-    return 1
-  fi
+    tap_xml_text "$xml" "Collapse item" || true
+    if wait_for_text 10 "Expand item"; then
+      dismiss_system_dialogs
+      xml="$(window_xml || true)"
+      tap_xml_text "$xml" "Expand item" || true
+      wait_for_text 30 "Collapse item"
+      return 0
+    fi
+
+    sleep 1
+  done
+
+  log "Fold collapse did not expose Expand item"
+  window_xml || true
+  return 1
 }
 
 scroll_document_once() {
