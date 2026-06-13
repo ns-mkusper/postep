@@ -157,9 +157,9 @@ tap_xml_text() {
   local bounds
   local x1 y1 x2 y2 x y
 
-  node="$(grep -o "<node[^>]*text=\"${label}\"[^>]*>" <<<"$xml" | head -n 1 || true)"
+  node="$(grep -o "<node[^>]*content-desc=\"${label}\"[^>]*>" <<<"$xml" | head -n 1 || true)"
   if [[ -z "$node" ]]; then
-    node="$(grep -o "<node[^>]*content-desc=\"${label}\"[^>]*>" <<<"$xml" | head -n 1 || true)"
+    node="$(grep -o "<node[^>]*text=\"${label}\"[^>]*>" <<<"$xml" | head -n 1 || true)"
   fi
   if [[ -z "$node" ]]; then
     return 1
@@ -176,6 +176,10 @@ tap_xml_text() {
   adb_cmd shell input tap "$x" "$y" || true
 }
 
+is_launcher_xml() {
+  grep -Eiq 'package="com\.android\.launcher3"|Pixel Launcher|Launcher3|nexuslauncher'
+}
+
 dismiss_system_dialogs() {
   local xml
 
@@ -190,16 +194,17 @@ dismiss_system_dialogs() {
       continue
     fi
 
-    if ! grep -Eiq "Pixel Launcher|Launcher3|nexuslauncher|isn.?t responding|Close app" <<<"$xml"; then
-      return 0
+    if grep -Eiq "isn.?t responding|Close app" <<<"$xml"; then
+      log "Dismissing Android system dialog before screenshot capture"
+      tap_xml_text "$xml" "Wait" || \
+        tap_xml_text "$xml" "OK" || \
+        tap_xml_text "$xml" "Close app" || \
+        adb_cmd shell input keyevent KEYCODE_ESCAPE || true
+      sleep 1
+      continue
     fi
 
-    log "Dismissing Android system dialog before screenshot capture"
-    tap_xml_text "$xml" "Wait" || \
-      tap_xml_text "$xml" "OK" || \
-      tap_xml_text "$xml" "Close app" || \
-      adb_cmd shell input keyevent KEYCODE_ESCAPE || true
-    sleep 1
+    return 0
   done
 }
 
@@ -396,23 +401,41 @@ wait_for_document_toolbar() {
 
 close_document_editor() {
   local xml
+  local relaunched
 
-  for _ in $(seq 1 5); do
+  for _ in $(seq 1 6); do
+    relaunched=0
     dismiss_system_dialogs
     xml="$(window_xml || true)"
+
+    if is_launcher_xml <<<"$xml"; then
+      relaunched=1
+      log "App left foreground while closing editor; relaunching app"
+      adb_cmd shell am start -W -n "$APP_ACTIVITY" >/dev/null || adb_cmd shell monkey -p "$APP_ID" 1 >/dev/null || true
+      sleep 4
+      dismiss_system_dialogs
+      xml="$(window_xml || true)"
+    fi
+
     if ! grep -Fq "Edit document source" <<<"$xml"; then
+      if wait_for_text 10 "More document actions"; then
+        return 0
+      fi
+      if [[ "$relaunched" == "1" ]]; then
+        open_route "library"
+        open_first_document
+        return 0
+      fi
+      sleep 1
+      continue
+    fi
+
+    tap_xml_text "$xml" "Cancel" || adb_cmd shell input tap 892 1776 || true
+    if wait_for_text_absent 10 "Edit document source"; then
       wait_for_text 30 "More document actions"
       return 0
     fi
 
-    if tap_xml_text "$xml" "Cancel"; then
-      if wait_for_text_absent 10 "Edit document source"; then
-        wait_for_text 30 "More document actions"
-        return 0
-      fi
-    fi
-
-    adb_cmd shell input keyevent KEYCODE_BACK || true
     adb_cmd shell input swipe 540 1750 540 720 300 || true
     sleep 1
   done

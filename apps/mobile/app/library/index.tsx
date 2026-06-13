@@ -1495,6 +1495,7 @@ export default function LibraryScreen() {
     secondary = false,
   ) => (
     <TouchableOpacity
+      key={testID}
       style={[
         secondary ? styles.documentDialogButtonSecondary : styles.documentDialogButton,
         secondary ? { backgroundColor: editTheme.inputBackground, borderColor: editTheme.border } : null,
