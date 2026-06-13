@@ -174,65 +174,128 @@ type NativeConfig = {
 
 type NativeModule = {
   ping(): string;
-  load_agenda_snapshot(config: NativeConfig): AgendaSnapshot;
+  load_agenda_snapshot?: (config: NativeConfig) => AgendaSnapshot;
+  loadAgendaSnapshot?: (config: NativeConfig) => AgendaSnapshot;
   load_agenda_snapshot_async?: (
     config: NativeConfig,
   ) => Promise<AgendaSnapshot>;
-  complete_agenda_item(params: {
+  loadAgendaSnapshotAsync?: (config: NativeConfig) => Promise<AgendaSnapshot>;
+  complete_agenda_item?: (params: {
     roots: string[];
     roam_roots?: string[];
     path: string;
     headline_line: number;
-  }): AgendaSnapshot;
+  }) => AgendaSnapshot;
+  completeAgendaItem?: (params: {
+    roots: string[];
+    roam_roots?: string[];
+    path: string;
+    headline_line: number;
+  }) => AgendaSnapshot;
   complete_agenda_item_async?: (params: {
     roots: string[];
     roam_roots?: string[];
     path: string;
     headline_line: number;
   }) => Promise<AgendaSnapshot>;
-  append_capture_entry(request: {
+  completeAgendaItemAsync?: (params: {
+    roots: string[];
+    roam_roots?: string[];
+    path: string;
+    headline_line: number;
+  }) => Promise<AgendaSnapshot>;
+  append_capture_entry?: (request: {
     roots: string[];
     roam_roots?: string[];
     target_path: string;
     content: string;
-  }): AgendaSnapshot;
+  }) => AgendaSnapshot;
+  appendCaptureEntry?: (request: {
+    roots: string[];
+    roam_roots?: string[];
+    target_path: string;
+    content: string;
+  }) => AgendaSnapshot;
   append_capture_entry_async?: (request: {
     roots: string[];
     roam_roots?: string[];
     target_path: string;
     content: string;
   }) => Promise<AgendaSnapshot>;
-  load_roam_graph(config: NativeConfig): RoamGraph;
+  appendCaptureEntryAsync?: (request: {
+    roots: string[];
+    roam_roots?: string[];
+    target_path: string;
+    content: string;
+  }) => Promise<AgendaSnapshot>;
+  load_roam_graph?: (config: NativeConfig) => RoamGraph;
+  loadRoamGraph?: (config: NativeConfig) => RoamGraph;
   load_roam_graph_async?: (config: NativeConfig) => Promise<RoamGraph>;
-  list_documents(config: NativeConfig): string[];
+  loadRoamGraphAsync?: (config: NativeConfig) => Promise<RoamGraph>;
+  list_documents?: (config: NativeConfig) => string[];
+  listDocuments?: (config: NativeConfig) => string[];
   list_documents_async?: (config: NativeConfig) => Promise<string[]>;
-  load_document(config: NativeConfig, path: string): DocumentPayload;
+  listDocumentsAsync?: (config: NativeConfig) => Promise<string[]>;
+  load_document?: (config: NativeConfig, path: string) => DocumentPayload;
+  loadDocument?: (config: NativeConfig, path: string) => DocumentPayload;
   load_document_async?: (
     config: NativeConfig,
     path: string,
   ) => Promise<DocumentPayload>;
-  update_document(params: {
+  loadDocumentAsync?: (
+    config: NativeConfig,
+    path: string,
+  ) => Promise<DocumentPayload>;
+  update_document?: (params: {
     roots: string[];
     roam_roots?: string[];
     path: string;
     raw: string;
-  }): DocumentPayload;
+  }) => DocumentPayload;
+  updateDocument?: (params: {
+    roots: string[];
+    roam_roots?: string[];
+    path: string;
+    raw: string;
+  }) => DocumentPayload;
   update_document_async?: (params: {
     roots: string[];
     roam_roots?: string[];
     path: string;
     raw: string;
   }) => Promise<DocumentPayload>;
-  set_roots(config: NativeConfig): void;
+  updateDocumentAsync?: (params: {
+    roots: string[];
+    roam_roots?: string[];
+    path: string;
+    raw: string;
+  }) => Promise<DocumentPayload>;
+  set_roots?: (config: NativeConfig) => void;
+  setRoots?: (config: NativeConfig) => void;
   set_roots_async?: (config: NativeConfig) => Promise<void>;
-  set_agenda_status(params: {
+  setRootsAsync?: (config: NativeConfig) => Promise<void>;
+  set_agenda_status?: (params: {
     roots: string[];
     roam_roots?: string[];
     path: string;
     headline_line: number;
     status: string;
-  }): AgendaSnapshot;
+  }) => AgendaSnapshot;
+  setAgendaStatus?: (params: {
+    roots: string[];
+    roam_roots?: string[];
+    path: string;
+    headline_line: number;
+    status: string;
+  }) => AgendaSnapshot;
   set_agenda_status_async?: (params: {
+    roots: string[];
+    roam_roots?: string[];
+    path: string;
+    headline_line: number;
+    status: string;
+  }) => Promise<AgendaSnapshot>;
+  setAgendaStatusAsync?: (params: {
     roots: string[];
     roam_roots?: string[];
     path: string;
@@ -254,6 +317,42 @@ const bridgeListeners: Record<BridgeEvent, Set<BridgeListener>> = {
 };
 
 export const E2E_ORG_ROOT = "postep-e2e://org";
+
+export function isVirtualOrgRoot(path: string): boolean {
+  return path.startsWith("content://") || path.startsWith("postep-e2e://");
+}
+
+export function normalizeLocalOrgPath(path: string): string {
+  if (isVirtualOrgRoot(path)) {
+    return path;
+  }
+  if (path === "~" || path.startsWith("~/") || path.startsWith("~\\")) {
+    const home =
+      getEnv("HOME") ??
+      getEnv("USERPROFILE") ??
+      (getEnv("HOMEDRIVE") && getEnv("HOMEPATH")
+        ? `${getEnv("HOMEDRIVE")}${getEnv("HOMEPATH")}`
+        : undefined);
+    if (home) {
+      const suffix = path.slice(1).replace(/^[/\\]/, "");
+      return suffix ? `${home.replace(/[/\\]$/, "")}/${suffix}` : home;
+    }
+  }
+  return path;
+}
+
+export function normalizeOrgBridgeConfig(config: OrgBridgeConfig): OrgBridgeConfig {
+  const roots = config.roots.map(normalizeLocalOrgPath);
+  const roamRoots = config.roamRoots?.map(normalizeLocalOrgPath);
+  return {
+    roots,
+    ...(roamRoots && roamRoots.length > 0 ? { roamRoots } : {}),
+  };
+}
+
+function hasAnyRoot(config: OrgBridgeConfig): boolean {
+  return config.roots.length > 0 || (config.roamRoots?.length ?? 0) > 0;
+}
 
 export function isE2EMode(): boolean {
   return (
@@ -333,10 +432,11 @@ export function ping(): string {
 }
 
 function toNativeConfig(config: OrgBridgeConfig): NativeConfig {
+  const normalized = normalizeOrgBridgeConfig(config);
   return {
-    roots: config.roots,
-    roam_roots: config.roamRoots,
-    roamRoots: config.roamRoots,
+    roots: normalized.roots,
+    roam_roots: normalized.roamRoots,
+    roamRoots: normalized.roamRoots,
   };
 }
 
@@ -346,10 +446,11 @@ function toNativeAgendaParams(params: CompleteAgendaParams): {
   path: string;
   headline_line: number;
 } {
+  const normalized = normalizeOrgBridgeConfig(params);
   return {
-    roots: params.roots,
-    roam_roots: params.roamRoots,
-    path: params.path,
+    roots: normalized.roots,
+    roam_roots: normalized.roamRoots,
+    path: normalizeLocalOrgPath(params.path),
     headline_line: params.headlineLine,
   };
 }
@@ -360,10 +461,11 @@ function toNativeCaptureRequest(request: CaptureRequest): {
   target_path: string;
   content: string;
 } {
+  const normalized = normalizeOrgBridgeConfig(request);
   return {
-    roots: request.roots,
-    roam_roots: request.roamRoots,
-    target_path: request.targetPath,
+    roots: normalized.roots,
+    roam_roots: normalized.roamRoots,
+    target_path: normalizeLocalOrgPath(request.targetPath),
     content: request.content,
   };
 }
@@ -374,10 +476,11 @@ function toNativeUpdateDocumentRequest(request: UpdateDocumentRequest): {
   path: string;
   raw: string;
 } {
+  const normalized = normalizeOrgBridgeConfig(request);
   return {
-    roots: request.roots,
-    roam_roots: request.roamRoots,
-    path: request.path,
+    roots: normalized.roots,
+    roam_roots: normalized.roamRoots,
+    path: normalizeLocalOrgPath(request.path),
     raw: request.raw,
   };
 }
@@ -389,10 +492,11 @@ function toNativeSetAgendaStatusParams(params: SetAgendaStatusParams): {
   headline_line: number;
   status: string;
 } {
+  const normalized = normalizeOrgBridgeConfig(params);
   return {
-    roots: params.roots,
-    roam_roots: params.roamRoots,
-    path: params.path,
+    roots: normalized.roots,
+    roam_roots: normalized.roamRoots,
+    path: normalizeLocalOrgPath(params.path),
     headline_line: params.headlineLine,
     status: params.status,
   };
@@ -409,9 +513,9 @@ export function loadAgendaSnapshot(config: OrgBridgeConfig): AgendaSnapshot {
   if (config.roots.length === 0) {
     return { items: [], habits: [] };
   }
-  const raw = resolveNativeBinding().load_agenda_snapshot(
-    toNativeConfig(config),
-  );
+  const binding = resolveNativeBinding();
+  const load = binding.load_agenda_snapshot ?? binding.loadAgendaSnapshot;
+  const raw = load!(toNativeConfig(config));
   return normalizeAgendaSnapshot(raw);
 }
 
@@ -423,9 +527,11 @@ export async function loadAgendaSnapshotAsync(
   }
   const binding = resolveNativeBinding();
   const nativeConfig = toNativeConfig(config);
-  const raw = binding.load_agenda_snapshot_async
-    ? await binding.load_agenda_snapshot_async(nativeConfig)
-    : binding.load_agenda_snapshot(nativeConfig);
+  const loadAsync = binding.load_agenda_snapshot_async ?? binding.loadAgendaSnapshotAsync;
+  const load = binding.load_agenda_snapshot ?? binding.loadAgendaSnapshot;
+  const raw = loadAsync
+    ? await loadAsync(nativeConfig)
+    : load!(nativeConfig);
   return normalizeAgendaSnapshot(raw);
 }
 
@@ -435,9 +541,9 @@ export function completeAgendaItem(
   if (params.roots.length === 0) {
     throw new Error("No Org roots configured");
   }
-  const raw = resolveNativeBinding().complete_agenda_item(
-    toNativeAgendaParams(params),
-  );
+  const binding = resolveNativeBinding();
+  const complete = binding.complete_agenda_item ?? binding.completeAgendaItem;
+  const raw = complete!(toNativeAgendaParams(params));
   emitBridgeEvent("agendaChanged");
   return normalizeAgendaSnapshot(raw);
 }
@@ -450,9 +556,11 @@ export async function completeAgendaItemAsync(
   }
   const binding = resolveNativeBinding();
   const nativeParams = toNativeAgendaParams(params);
-  const raw = binding.complete_agenda_item_async
-    ? await binding.complete_agenda_item_async(nativeParams)
-    : binding.complete_agenda_item(nativeParams);
+  const completeAsync = binding.complete_agenda_item_async ?? binding.completeAgendaItemAsync;
+  const complete = binding.complete_agenda_item ?? binding.completeAgendaItem;
+  const raw = completeAsync
+    ? await completeAsync(nativeParams)
+    : complete!(nativeParams);
   emitBridgeEvent("agendaChanged");
   return normalizeAgendaSnapshot(raw);
 }
@@ -461,9 +569,9 @@ export function appendCaptureEntry(request: CaptureRequest): AgendaSnapshot {
   if (request.roots.length === 0) {
     throw new Error("No Org roots configured");
   }
-  const raw = resolveNativeBinding().append_capture_entry(
-    toNativeCaptureRequest(request),
-  );
+  const binding = resolveNativeBinding();
+  const append = binding.append_capture_entry ?? binding.appendCaptureEntry;
+  const raw = append!(toNativeCaptureRequest(request));
   emitBridgeEvent("agendaChanged");
   emitBridgeEvent("documentsChanged");
   return normalizeAgendaSnapshot(raw);
@@ -477,9 +585,11 @@ export async function appendCaptureEntryAsync(
   }
   const binding = resolveNativeBinding();
   const nativeRequest = toNativeCaptureRequest(request);
-  const raw = binding.append_capture_entry_async
-    ? await binding.append_capture_entry_async(nativeRequest)
-    : binding.append_capture_entry(nativeRequest);
+  const appendAsync = binding.append_capture_entry_async ?? binding.appendCaptureEntryAsync;
+  const append = binding.append_capture_entry ?? binding.appendCaptureEntry;
+  const raw = appendAsync
+    ? await appendAsync(nativeRequest)
+    : append!(nativeRequest);
   emitBridgeEvent("agendaChanged");
   emitBridgeEvent("documentsChanged");
   return normalizeAgendaSnapshot(raw);
@@ -489,7 +599,9 @@ export function loadRoamGraph(config: OrgBridgeConfig): RoamGraph {
   if (!config.roamRoots || config.roamRoots.length === 0) {
     return { nodes: [], links: [] };
   }
-  return resolveNativeBinding().load_roam_graph(toNativeConfig(config));
+  const binding = resolveNativeBinding();
+  const load = binding.load_roam_graph ?? binding.loadRoamGraph;
+  return load!(toNativeConfig(config));
 }
 
 export async function loadRoamGraphAsync(
@@ -500,30 +612,36 @@ export async function loadRoamGraphAsync(
   }
   const binding = resolveNativeBinding();
   const nativeConfig = toNativeConfig(config);
-  return binding.load_roam_graph_async
-    ? await binding.load_roam_graph_async(nativeConfig)
-    : binding.load_roam_graph(nativeConfig);
+  const loadAsync = binding.load_roam_graph_async ?? binding.loadRoamGraphAsync;
+  const load = binding.load_roam_graph ?? binding.loadRoamGraph;
+  return loadAsync
+    ? await loadAsync(nativeConfig)
+    : load!(nativeConfig);
 }
 
 export function listDocuments(config: OrgBridgeConfig): DocumentRef[] {
-  if (config.roots.length === 0) {
+  if (!hasAnyRoot(config)) {
     return [];
   }
-  const entries = resolveNativeBinding().list_documents(toNativeConfig(config));
+  const binding = resolveNativeBinding();
+  const list = binding.list_documents ?? binding.listDocuments;
+  const entries = list!(toNativeConfig(config));
   return documentRefsFromPaths(entries);
 }
 
 export async function listDocumentsAsync(
   config: OrgBridgeConfig,
 ): Promise<DocumentRef[]> {
-  if (config.roots.length === 0) {
+  if (!hasAnyRoot(config)) {
     return [];
   }
   const binding = resolveNativeBinding();
   const nativeConfig = toNativeConfig(config);
-  const entries = binding.list_documents_async
-    ? await binding.list_documents_async(nativeConfig)
-    : binding.list_documents(nativeConfig);
+  const listAsync = binding.list_documents_async ?? binding.listDocumentsAsync;
+  const list = binding.list_documents ?? binding.listDocuments;
+  const entries = listAsync
+    ? await listAsync(nativeConfig)
+    : list!(nativeConfig);
   return documentRefsFromPaths(entries);
 }
 
@@ -535,35 +653,41 @@ export function loadDocument(
   config: OrgBridgeConfig,
   path: string,
 ): DocumentPayload {
-  if (config.roots.length === 0) {
+  if (!hasAnyRoot(config)) {
     return { path, raw: "", lexical: [] };
   }
-  return resolveNativeBinding().load_document(toNativeConfig(config), path);
+  const normalizedPath = normalizeLocalOrgPath(path);
+  const binding = resolveNativeBinding();
+  const load = binding.load_document ?? binding.loadDocument;
+  return load!(toNativeConfig(config), normalizedPath);
 }
 
 export async function loadDocumentAsync(
   config: OrgBridgeConfig,
   path: string,
 ): Promise<DocumentPayload> {
-  if (config.roots.length === 0) {
+  if (!hasAnyRoot(config)) {
     return { path, raw: "", lexical: [] };
   }
   const binding = resolveNativeBinding();
   const nativeConfig = toNativeConfig(config);
-  return binding.load_document_async
-    ? await binding.load_document_async(nativeConfig, path)
-    : binding.load_document(nativeConfig, path);
+  const normalizedPath = normalizeLocalOrgPath(path);
+  const loadAsync = binding.load_document_async ?? binding.loadDocumentAsync;
+  const load = binding.load_document ?? binding.loadDocument;
+  return loadAsync
+    ? await loadAsync(nativeConfig, normalizedPath)
+    : load!(nativeConfig, normalizedPath);
 }
 
 export function updateDocument(
   request: UpdateDocumentRequest,
 ): DocumentPayload {
-  if (request.roots.length === 0) {
+  if (!hasAnyRoot(request)) {
     throw new Error("No Org roots configured");
   }
-  const payload = resolveNativeBinding().update_document(
-    toNativeUpdateDocumentRequest(request),
-  );
+  const binding = resolveNativeBinding();
+  const update = binding.update_document ?? binding.updateDocument;
+  const payload = update!(toNativeUpdateDocumentRequest(request));
   emitBridgeEvent("documentsChanged");
   emitBridgeEvent("agendaChanged");
   return payload;
@@ -572,14 +696,16 @@ export function updateDocument(
 export async function updateDocumentAsync(
   request: UpdateDocumentRequest,
 ): Promise<DocumentPayload> {
-  if (request.roots.length === 0) {
+  if (!hasAnyRoot(request)) {
     throw new Error("No Org roots configured");
   }
   const binding = resolveNativeBinding();
   const nativeRequest = toNativeUpdateDocumentRequest(request);
-  const payload = binding.update_document_async
-    ? await binding.update_document_async(nativeRequest)
-    : binding.update_document(nativeRequest);
+  const updateAsync = binding.update_document_async ?? binding.updateDocumentAsync;
+  const update = binding.update_document ?? binding.updateDocument;
+  const payload = updateAsync
+    ? await updateAsync(nativeRequest)
+    : update!(nativeRequest);
   emitBridgeEvent("documentsChanged");
   emitBridgeEvent("agendaChanged");
   return payload;
@@ -609,7 +735,9 @@ export function emitBridgeEvent(event: BridgeEvent): void {
 }
 
 export function setRoots(config: OrgBridgeConfig): void {
-  resolveNativeBinding().set_roots(toNativeConfig(config));
+  const binding = resolveNativeBinding();
+  const setNativeRoots = binding.set_roots ?? binding.setRoots;
+  setNativeRoots!(toNativeConfig(config));
   emitBridgeEvent("rootsChanged");
   emitBridgeEvent("documentsChanged");
 }
@@ -617,10 +745,12 @@ export function setRoots(config: OrgBridgeConfig): void {
 export async function setRootsAsync(config: OrgBridgeConfig): Promise<void> {
   const binding = resolveNativeBinding();
   const nativeConfig = toNativeConfig(config);
-  if (binding.set_roots_async) {
-    await binding.set_roots_async(nativeConfig);
+  const setNativeRootsAsync = binding.set_roots_async ?? binding.setRootsAsync;
+  const setNativeRoots = binding.set_roots ?? binding.setRoots;
+  if (setNativeRootsAsync) {
+    await setNativeRootsAsync(nativeConfig);
   } else {
-    binding.set_roots(nativeConfig);
+    setNativeRoots!(nativeConfig);
   }
   emitBridgeEvent("rootsChanged");
   emitBridgeEvent("documentsChanged");
@@ -630,9 +760,9 @@ export function setAgendaStatus(params: SetAgendaStatusParams): AgendaSnapshot {
   if (params.roots.length === 0) {
     throw new Error("No Org roots configured");
   }
-  const raw = resolveNativeBinding().set_agenda_status(
-    toNativeSetAgendaStatusParams(params),
-  );
+  const binding = resolveNativeBinding();
+  const setNativeAgendaStatus = binding.set_agenda_status ?? binding.setAgendaStatus;
+  const raw = setNativeAgendaStatus!(toNativeSetAgendaStatusParams(params));
   emitBridgeEvent("agendaChanged");
   return normalizeAgendaSnapshot(raw);
 }
@@ -645,9 +775,11 @@ export async function setAgendaStatusAsync(
   }
   const binding = resolveNativeBinding();
   const nativeParams = toNativeSetAgendaStatusParams(params);
-  const raw = binding.set_agenda_status_async
-    ? await binding.set_agenda_status_async(nativeParams)
-    : binding.set_agenda_status(nativeParams);
+  const setNativeAgendaStatusAsync = binding.set_agenda_status_async ?? binding.setAgendaStatusAsync;
+  const setNativeAgendaStatus = binding.set_agenda_status ?? binding.setAgendaStatus;
+  const raw = setNativeAgendaStatusAsync
+    ? await setNativeAgendaStatusAsync(nativeParams)
+    : setNativeAgendaStatus!(nativeParams);
   emitBridgeEvent("agendaChanged");
   return normalizeAgendaSnapshot(raw);
 }

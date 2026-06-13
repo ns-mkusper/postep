@@ -69,6 +69,27 @@ type NoteLine = {
   checked?: boolean | null;
   kind: "heading" | "list" | "body";
   lineStart?: number;
+  todo?: string | null;
+  priority?: string | null;
+  tags?: string[];
+};
+
+type SourceTokenKind =
+  | "plain"
+  | "marker"
+  | "todo"
+  | "done"
+  | "priority"
+  | "tag"
+  | "keyword"
+  | "drawer"
+  | "link"
+  | "code"
+  | "comment";
+
+type SourceToken = {
+  text: string;
+  kind: SourceTokenKind;
 };
 
 type NoteMetadata = {
@@ -122,70 +143,78 @@ type DocumentActionIcon =
   | "state"
   | "add";
 
-function GraphicalActionIcon({ name }: { name: DocumentActionIcon }) {
+function GraphicalActionIcon({
+  name,
+  color = "#30343F",
+  surface = "#ECECF6",
+}: {
+  name: DocumentActionIcon;
+  color?: string;
+  surface?: string;
+}) {
   if (name === "cut") {
     return (
       <View style={styles.cutIcon}>
-        <View style={[styles.cutBlade, styles.cutBladeLeft]} />
-        <View style={[styles.cutBlade, styles.cutBladeRight]} />
-        <View style={[styles.cutHandle, styles.cutHandleLeft]} />
-        <View style={[styles.cutHandle, styles.cutHandleRight]} />
+        <View style={[styles.cutBlade, styles.cutBladeLeft, { backgroundColor: color }]} />
+        <View style={[styles.cutBlade, styles.cutBladeRight, { backgroundColor: color }]} />
+        <View style={[styles.cutHandle, styles.cutHandleLeft, { borderColor: color }]} />
+        <View style={[styles.cutHandle, styles.cutHandleRight, { borderColor: color }]} />
       </View>
     );
   }
   if (name === "copy") {
     return (
       <View style={styles.copyIcon}>
-        <View style={[styles.copyIconSquare, styles.copyIconBack]} />
-        <View style={[styles.copyIconSquare, styles.copyIconFront]} />
+        <View style={[styles.copyIconSquare, styles.copyIconBack, { borderColor: color, backgroundColor: surface }]} />
+        <View style={[styles.copyIconSquare, styles.copyIconFront, { borderColor: color, backgroundColor: surface }]} />
       </View>
     );
   }
   if (name === "paste") {
     return (
-      <View style={styles.clipboardIcon}>
-        <View style={styles.clipboardClip} />
-        <View style={styles.clipboardLine} />
-        <View style={[styles.clipboardLine, styles.clipboardLineShort]} />
+      <View style={[styles.clipboardIcon, { borderColor: color }]}>
+        <View style={[styles.clipboardClip, { borderColor: color, backgroundColor: surface }]} />
+        <View style={[styles.clipboardLine, { backgroundColor: color }]} />
+        <View style={[styles.clipboardLine, styles.clipboardLineShort, { backgroundColor: color }]} />
       </View>
     );
   }
   if (name === "move") {
     return (
       <View style={styles.moveIcon}>
-        <View style={[styles.moveArrowHead, styles.moveArrowUp]} />
-        <View style={styles.moveStem} />
-        <View style={[styles.moveArrowHead, styles.moveArrowDown]} />
+        <View style={[styles.moveArrowHead, styles.moveArrowUp, { borderBottomColor: color }]} />
+        <View style={[styles.moveStem, { backgroundColor: color }]} />
+        <View style={[styles.moveArrowHead, styles.moveArrowDown, { borderTopColor: color }]} />
       </View>
     );
   }
   if (name === "overflow") {
     return (
       <View style={styles.overflowIcon}>
-        <View style={styles.overflowDot} />
-        <View style={styles.overflowDot} />
-        <View style={styles.overflowDot} />
+        <View style={[styles.overflowDot, { backgroundColor: color }]} />
+        <View style={[styles.overflowDot, { backgroundColor: color }]} />
+        <View style={[styles.overflowDot, { backgroundColor: color }]} />
       </View>
     );
   }
   if (name === "archive") {
     return (
-      <View style={styles.archiveIcon}>
-        <View style={styles.archiveLid} />
-        <View style={styles.archiveArrowStem} />
-        <View style={styles.archiveArrowHead} />
+      <View style={[styles.archiveIcon, { borderColor: color }]}>
+        <View style={[styles.archiveLid, { borderColor: color, backgroundColor: surface }]} />
+        <View style={[styles.archiveArrowStem, { backgroundColor: color }]} />
+        <View style={[styles.archiveArrowHead, { borderColor: color }]} />
       </View>
     );
   }
   if (name === "calendar") {
     return (
-      <View style={styles.calendarIcon}>
-        <View style={styles.calendarHeader} />
+      <View style={[styles.calendarIcon, { borderColor: color }]}>
+        <View style={[styles.calendarHeader, { backgroundColor: color }]} />
         <View style={styles.calendarGrid}>
-          <View style={styles.calendarDot} />
-          <View style={styles.calendarDot} />
-          <View style={styles.calendarDot} />
-          <View style={styles.calendarDot} />
+          <View style={[styles.calendarDot, { backgroundColor: color }]} />
+          <View style={[styles.calendarDot, { backgroundColor: color }]} />
+          <View style={[styles.calendarDot, { backgroundColor: color }]} />
+          <View style={[styles.calendarDot, { backgroundColor: color }]} />
         </View>
       </View>
     );
@@ -193,11 +222,11 @@ function GraphicalActionIcon({ name }: { name: DocumentActionIcon }) {
   if (name === "deadline") {
     return (
       <View style={styles.alarmIcon}>
-        <View style={[styles.alarmBell, styles.alarmBellLeft]} />
-        <View style={[styles.alarmBell, styles.alarmBellRight]} />
-        <View style={styles.alarmFace}>
-          <View style={styles.alarmHourHand} />
-          <View style={styles.alarmMinuteHand} />
+        <View style={[styles.alarmBell, styles.alarmBellLeft, { backgroundColor: color }]} />
+        <View style={[styles.alarmBell, styles.alarmBellRight, { backgroundColor: color }]} />
+        <View style={[styles.alarmFace, { borderColor: color }]}>
+          <View style={[styles.alarmHourHand, { backgroundColor: color }]} />
+          <View style={[styles.alarmMinuteHand, { backgroundColor: color }]} />
         </View>
       </View>
     );
@@ -205,22 +234,22 @@ function GraphicalActionIcon({ name }: { name: DocumentActionIcon }) {
   if (name === "priority") {
     return (
       <View style={styles.priorityIcon}>
-        <View style={styles.priorityPole} />
-        <View style={styles.priorityFlag} />
+        <View style={[styles.priorityPole, { backgroundColor: color }]} />
+        <View style={[styles.priorityFlag, { backgroundColor: color }]} />
       </View>
     );
   }
   if (name === "state") {
     return (
-      <View style={styles.stateIcon}>
-        <View style={styles.stateCheck} />
+      <View style={[styles.stateIcon, { borderColor: color }]}>
+        <View style={[styles.stateCheck, { borderColor: color }]} />
       </View>
     );
   }
   return (
     <View style={styles.addIcon}>
-      <View style={styles.addVertical} />
-      <View style={styles.addHorizontal} />
+      <View style={[styles.addVertical, { backgroundColor: color }]} />
+      <View style={[styles.addHorizontal, { backgroundColor: color }]} />
     </View>
   );
 }
@@ -309,6 +338,75 @@ function cleanOrgText(text: string) {
     .replace(/\[\[([^\]]+)\]\]/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function splitOrgInlineSyntax(text: string): SourceToken[] {
+  const tokens: SourceToken[] = [];
+  const pattern = /(\[\[[^\]]+\](?:\[[^\]]*\])?\])|([*_~=])([^\s].*?[^\s]|[^\s])\2/g;
+  let offset = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    if (match.index > offset) {
+      tokens.push({ text: text.slice(offset, match.index), kind: "plain" });
+    }
+    tokens.push({
+      text: match[0],
+      kind: match[1] ? "link" : match[2] === "=" || match[2] === "~" ? "code" : "plain",
+    });
+    offset = pattern.lastIndex;
+  }
+  if (offset < text.length) {
+    tokens.push({ text: text.slice(offset), kind: "plain" });
+  }
+  return tokens.length > 0 ? tokens : [{ text, kind: "plain" }];
+}
+
+function tokenizeOrgSourceLine(line: string): SourceToken[] {
+  if (line.trim().length === 0) {
+    return [{ text: " ", kind: "plain" }];
+  }
+  const directive = line.match(/^(\s*#\+[^:]+:)(.*)$/);
+  if (directive) {
+    return [
+      { text: directive[1], kind: "keyword" },
+      ...splitOrgInlineSyntax(directive[2]),
+    ];
+  }
+  if (/^\s*#/.test(line)) {
+    return [{ text: line, kind: "comment" }];
+  }
+  const drawer = line.match(/^(\s*:[A-Z0-9_+-]+:)(.*)$/i);
+  if (drawer) {
+    return [
+      { text: drawer[1], kind: "drawer" },
+      { text: drawer[2], kind: "plain" },
+    ];
+  }
+  const planning = line.match(/^(\s*(?:SCHEDULED|DEADLINE|CLOSED):)(.*)$/);
+  if (planning) {
+    return [
+      { text: planning[1], kind: "keyword" },
+      { text: planning[2], kind: "plain" },
+    ];
+  }
+  const heading = line.match(/^(\*+\s+)(?:(TODO|NEXT|WAITING|DONE|CANCELLED|CANCELED|SOMEDAY)\s+)?(?:\[#([A-Z0-9])\]\s+)?(.*?)(\s+:[A-Za-z0-9_@#%:-]+:)?$/);
+  if (heading) {
+    return [
+      { text: heading[1], kind: "marker" },
+      ...(heading[2] ? [{ text: `${heading[2]} `, kind: heading[2] === "DONE" ? "done" : "todo" } as SourceToken] : []),
+      ...(heading[3] ? [{ text: `[#${heading[3]}] `, kind: "priority" } as SourceToken] : []),
+      ...splitOrgInlineSyntax(heading[4] ?? ""),
+      ...(heading[5] ? [{ text: heading[5], kind: "tag" } as SourceToken] : []),
+    ];
+  }
+  const list = line.match(/^(\s*(?:[-+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)(.*)$/);
+  if (list) {
+    return [
+      { text: list[1], kind: "marker" },
+      ...splitOrgInlineSyntax(list[2] ?? ""),
+    ];
+  }
+  return splitOrgInlineSyntax(line);
 }
 
 function humanizeTimestamp(text?: string | null) {
@@ -427,7 +525,15 @@ function buildPreview(doc: DocumentRef, payload: DocumentPayload): NotePreview {
     .flatMap((node): NoteLine[] => {
       if (node.type === "heading") {
         const text = textForNode(node);
-        return text && text !== title ? [{ text, kind: "heading" }] : [];
+        return text && text !== title
+          ? [{
+              text,
+              kind: "heading",
+              todo: node.todo_keyword ?? null,
+              priority: node.priority ?? null,
+              tags: node.tags,
+            }]
+          : [];
       }
       if (node.type === "list_item") {
         const text = listItemPreviewText(payload.raw, node);
@@ -719,9 +825,13 @@ function toggleRawCheckbox(raw: string, lineStart: number): string {
 type DocumentEditTheme = {
   background: string;
   inputBackground: string;
+  barBackground: string;
+  toolbarBackground: string;
   text: string;
   muted: string;
   border: string;
+  icon: string;
+  iconSurface: string;
   placeholder: string;
   selection: string;
 };
@@ -731,18 +841,26 @@ function documentEditTheme(dark: boolean): DocumentEditTheme {
     ? {
         background: "#071008",
         inputBackground: "#0C150B",
+        barBackground: "#111A10",
+        toolbarBackground: "#091108",
         text: "#F2F5EC",
         muted: "#A7AEA0",
         border: "#303B2D",
+        icon: "#D7DCD0",
+        iconSurface: "#111A10",
         placeholder: "#6F7769",
         selection: "#7F9F52",
       }
     : {
         background: "#FAF9FD",
         inputBackground: "#FFFFFF",
+        barBackground: "#ECECF6",
+        toolbarBackground: "#ECECF6",
         text: "#252832",
         muted: "#6B7280",
         border: "#DADAE4",
+        icon: "#30343F",
+        iconSurface: "#ECECF6",
         placeholder: "#9CA3AF",
         selection: "#AFC0FF",
       };
@@ -1329,6 +1447,81 @@ export default function LibraryScreen() {
 
   const openNote = (path: string) => setSelectedPath(path);
 
+  const sourceTokenStyle = (
+    kind: SourceTokenKind,
+    palette = { text: editTheme.text, muted: editTheme.muted },
+  ) => {
+    if (kind === "marker" || kind === "comment") {
+      return [styles.sourceTokenMuted, { color: palette.muted }];
+    }
+    if (kind === "todo") {
+      return styles.sourceTokenTodo;
+    }
+    if (kind === "done") {
+      return styles.sourceTokenDone;
+    }
+    if (kind === "priority") {
+      return styles.sourceTokenPriority;
+    }
+    if (kind === "tag" || kind === "link") {
+      return styles.sourceTokenLink;
+    }
+    if (kind === "keyword" || kind === "drawer") {
+      return styles.sourceTokenKeyword;
+    }
+    if (kind === "code") {
+      return styles.sourceTokenCode;
+    }
+    return { color: palette.text };
+  };
+
+  const renderSourceTokens = (
+    text: string,
+    keyPrefix: string,
+    palette = { text: "#E6EADF", muted: "#9AA193" },
+  ) =>
+    splitOrgInlineSyntax(text).map((token, tokenIndex) => (
+      <Text key={`${keyPrefix}:${tokenIndex}`} style={sourceTokenStyle(token.kind, palette)}>
+        {token.text}
+      </Text>
+    ));
+
+  const renderOrgSourceLine = (line: string, index: number) => (
+    <Text key={`${index}:${line}`} style={[styles.sourcePreviewLine, { color: editTheme.text }]}>
+      {tokenizeOrgSourceLine(line).map((token, tokenIndex) => (
+        <Text
+          key={`${index}:${tokenIndex}`}
+          testID={index < 12 ? `source-token-${token.kind}-${index}-${tokenIndex}` : undefined}
+          style={sourceTokenStyle(token.kind)}
+        >
+          {token.text}
+        </Text>
+      ))}
+    </Text>
+  );
+
+  const renderSourcePreview = (raw: string) => {
+    const lines = raw.split("\n");
+    return (
+      <ScrollView
+        horizontal
+        style={[
+          styles.sourcePreview,
+          { backgroundColor: editTheme.inputBackground, borderColor: editTheme.border },
+        ]}
+        contentContainerStyle={styles.sourcePreviewContent}
+        testID="document-edit-source-highlight"
+      >
+        <View>
+          {lines.slice(0, 80).map(renderOrgSourceLine)}
+          {lines.length > 80 ? (
+            <Text style={[styles.sourcePreviewLine, { color: editTheme.muted }]}>...</Text>
+          ) : null}
+        </View>
+      </ScrollView>
+    );
+  };
+
   const renderPreviewLine = (
     item: NotePreview,
     line: NoteLine,
@@ -1358,7 +1551,7 @@ export default function LibraryScreen() {
                 line.checked && styles.previewCheckedText,
               ]}
             >
-              {line.text}
+              {renderSourceTokens(line.text, `preview-list-${item.doc.name}-${index}`)}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1382,15 +1575,26 @@ export default function LibraryScreen() {
               : styles.previewBullet
           }
         />
-        <Text
-          numberOfLines={index > 3 ? 1 : 2}
-          style={[
-            styles.previewText,
-            line.kind === "heading" && styles.previewHeadingText,
-          ]}
-        >
-          {line.text}
-        </Text>
+        <View style={styles.previewTextButton} testID={`note-rendered-preview-${item.doc.name}-${index}`}>
+          {line.kind === "heading" && (line.todo || line.priority || (line.tags?.length ?? 0) > 0) ? (
+            <View style={styles.previewMetadataInline}>
+              {line.todo ? <Text style={styles.todoChip}>{line.todo}</Text> : null}
+              {line.priority ? <Text style={styles.priorityChip}>#{line.priority}</Text> : null}
+              {line.tags?.slice(0, 2).map((tag) => (
+                <Text key={tag} style={styles.tagChip}>#{tag}</Text>
+              ))}
+            </View>
+          ) : null}
+          <Text
+            numberOfLines={index > 3 ? 1 : 2}
+            style={[
+              styles.previewText,
+              line.kind === "heading" && styles.previewHeadingText,
+            ]}
+          >
+            {renderSourceTokens(line.text, `preview-${item.doc.name}-${index}`)}
+          </Text>
+        </View>
       </TouchableOpacity>
     );
   };
@@ -1890,21 +2094,30 @@ export default function LibraryScreen() {
           </TouchableOpacity>
         </View>
       ) : (
-        <View style={styles.editorScreen}>
-          <View style={styles.documentTopBar}>
+        <View style={[styles.editorScreen, { backgroundColor: editTheme.background }]}>
+          <View
+            style={[
+              styles.documentTopBar,
+              {
+                backgroundColor: editTheme.barBackground,
+                borderBottomColor: editTheme.border,
+              },
+            ]}
+            testID="document-top-bar"
+          >
             <TouchableOpacity
               onPress={() => setSelectedPath(null)}
               style={styles.iconButton}
               testID="back-to-notes"
             >
-              <Text style={styles.documentBackIcon}>‹</Text>
+              <Text style={[styles.documentBackIcon, { color: editTheme.icon }]}>‹</Text>
             </TouchableOpacity>
             <View style={styles.editorTitleBlock}>
-              <Text style={styles.editorTitle} numberOfLines={1}>
+              <Text style={[styles.editorTitle, { color: editTheme.text }]} numberOfLines={1}>
                 {selectedName.replace(/\.org$/i, "")}
               </Text>
               {interactionStatus && (
-                <Text style={styles.editorSubtitle}>{interactionStatus}</Text>
+                <Text style={[styles.editorSubtitle, { color: editTheme.muted }]}>{interactionStatus}</Text>
               )}
             </View>
             <TouchableOpacity
@@ -1913,7 +2126,7 @@ export default function LibraryScreen() {
               testID="document-action-cut"
               onPress={cutSelectedItem}
             >
-              <GraphicalActionIcon name="cut" />
+              <GraphicalActionIcon name="cut" color={editTheme.icon} surface={editTheme.barBackground} />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.documentIconButton}
@@ -1921,7 +2134,7 @@ export default function LibraryScreen() {
               testID="document-action-copy"
               onPress={copySelectedItem}
             >
-              <GraphicalActionIcon name="copy" />
+              <GraphicalActionIcon name="copy" color={editTheme.icon} surface={editTheme.barBackground} />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.documentIconButton}
@@ -1929,7 +2142,7 @@ export default function LibraryScreen() {
               testID="document-action-paste"
               onPress={() => setActiveDocumentDialog("paste")}
             >
-              <GraphicalActionIcon name="paste" />
+              <GraphicalActionIcon name="paste" color={editTheme.icon} surface={editTheme.barBackground} />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.documentIconButton}
@@ -1937,7 +2150,7 @@ export default function LibraryScreen() {
               testID="document-action-move"
               onPress={() => setActiveDocumentDialog("move")}
             >
-              <GraphicalActionIcon name="move" />
+              <GraphicalActionIcon name="move" color={editTheme.icon} surface={editTheme.barBackground} />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.documentIconButton}
@@ -1945,25 +2158,37 @@ export default function LibraryScreen() {
               testID="document-action-overflow"
               onPress={() => setActiveDocumentDialog("overflow")}
             >
-              <GraphicalActionIcon name="overflow" />
+              <GraphicalActionIcon name="overflow" color={editTheme.icon} surface={editTheme.barBackground} />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.documentModeBar}>
+          <View
+            style={[
+              styles.documentModeBar,
+              {
+                backgroundColor: editTheme.background,
+                borderBottomColor: editTheme.border,
+              },
+            ]}
+            testID="document-mode-bar"
+          >
             <View style={styles.switchItem}>
-              <Text style={styles.switchLabel}>Reader</Text>
+              <Text style={[styles.switchLabel, { color: editTheme.text }]}>Reader</Text>
               <Switch value={readerMode} onValueChange={setReaderMode} />
             </View>
             <View style={styles.switchItem}>
-              <Text style={styles.switchLabel}>Outline</Text>
+              <Text style={[styles.switchLabel, { color: editTheme.text }]}>Outline</Text>
               <Switch value={outlineOnly} onValueChange={setOutlineOnly} />
             </View>
           </View>
 
           <ScrollView
             testID="document-scroll"
-            style={styles.documentScroll}
-            contentContainerStyle={styles.orgDocumentContent}
+            style={[styles.documentScroll, { backgroundColor: editTheme.background }]}
+            contentContainerStyle={[
+              styles.orgDocumentContent,
+              { backgroundColor: editTheme.background },
+            ]}
           >
             {documentQuery.isFetching ? (
               <ActivityIndicator
@@ -1982,6 +2207,7 @@ export default function LibraryScreen() {
                       <Text style={styles.documentDialogButtonSecondaryText}>Cancel</Text>
                     </TouchableOpacity>
                   </View>
+                  {renderSourcePreview(documentDraftRaw)}
                   <TextInput
                     testID="document-edit-source"
                     accessibilityLabel="Edit document source"
@@ -2012,14 +2238,23 @@ export default function LibraryScreen() {
             )}
           </ScrollView>
 
-          <View style={styles.orgBottomToolbar}>
+          <View
+            style={[
+              styles.orgBottomToolbar,
+              {
+                backgroundColor: editTheme.toolbarBackground,
+                borderTopColor: editTheme.border,
+              },
+            ]}
+            testID="document-bottom-toolbar"
+          >
             <TouchableOpacity
               style={styles.orgBottomTool}
               accessibilityLabel="Archive or refile item"
               testID="document-bottom-archive"
               onPress={() => setActiveDocumentDialog("refile")}
             >
-              <GraphicalActionIcon name="archive" />
+              <GraphicalActionIcon name="archive" color={editTheme.icon} surface={editTheme.toolbarBackground} />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.orgBottomTool}
@@ -2027,7 +2262,7 @@ export default function LibraryScreen() {
               testID="document-bottom-schedule"
               onPress={() => setActiveDocumentDialog("schedule")}
             >
-              <GraphicalActionIcon name="calendar" />
+              <GraphicalActionIcon name="calendar" color={editTheme.icon} surface={editTheme.toolbarBackground} />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.orgBottomTool}
@@ -2035,7 +2270,7 @@ export default function LibraryScreen() {
               testID="document-bottom-deadline"
               onPress={() => setActiveDocumentDialog("deadline")}
             >
-              <GraphicalActionIcon name="deadline" />
+              <GraphicalActionIcon name="deadline" color={editTheme.icon} surface={editTheme.toolbarBackground} />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.orgBottomTool}
@@ -2043,7 +2278,7 @@ export default function LibraryScreen() {
               testID="document-bottom-priority"
               onPress={() => setActiveDocumentDialog("priority")}
             >
-              <GraphicalActionIcon name="priority" />
+              <GraphicalActionIcon name="priority" color={editTheme.icon} surface={editTheme.toolbarBackground} />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.orgBottomTool}
@@ -2051,7 +2286,7 @@ export default function LibraryScreen() {
               testID="document-bottom-state"
               onPress={() => setActiveDocumentDialog("state")}
             >
-              <GraphicalActionIcon name="state" />
+              <GraphicalActionIcon name="state" color={editTheme.icon} surface={editTheme.toolbarBackground} />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.orgBottomTool}
@@ -2059,7 +2294,7 @@ export default function LibraryScreen() {
               testID="document-bottom-add"
               onPress={() => setActiveDocumentDialog("add")}
             >
-              <GraphicalActionIcon name="add" />
+              <GraphicalActionIcon name="add" color={editTheme.icon} surface={editTheme.toolbarBackground} />
             </TouchableOpacity>
           </View>
         </View>
@@ -2411,6 +2646,12 @@ const styles = StyleSheet.create({
   previewLines: { gap: 8 },
   previewLine: { flexDirection: "row", alignItems: "flex-start", gap: 9 },
   previewHeadingLine: { marginTop: 8 },
+  previewMetadataInline: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 4,
+  },
   previewTextButton: { flex: 1 },
   checkbox: {
     width: 20,
@@ -3003,6 +3244,48 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     gap: 10,
     marginBottom: 12,
+  },
+  sourcePreview: {
+    maxHeight: 230,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  sourcePreviewContent: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  sourcePreviewLine: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }),
+  },
+  sourceTokenMuted: {
+    opacity: 0.72,
+  },
+  sourceTokenTodo: {
+    color: "#B7E38A",
+    fontWeight: "900",
+  },
+  sourceTokenDone: {
+    color: "#8B9287",
+    fontWeight: "800",
+  },
+  sourceTokenPriority: {
+    color: "#F6C86A",
+    fontWeight: "900",
+  },
+  sourceTokenLink: {
+    color: "#8DC8FF",
+    fontWeight: "700",
+  },
+  sourceTokenKeyword: {
+    color: "#D2A6FF",
+    fontWeight: "800",
+  },
+  sourceTokenCode: {
+    color: "#A8E9BE",
+    backgroundColor: "rgba(77, 95, 49, 0.24)",
   },
   orgBottomToolbar: {
     position: "absolute",

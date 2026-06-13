@@ -37,6 +37,8 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
   await expect(page.getByTestId('org-library-title')).toHaveText('Local Org');
   await expect(page.getByText('10 notes')).toBeVisible();
   await expect(page.getByTestId('document-card-sample-01.org')).toBeVisible();
+  await expect(page.getByTestId('note-rendered-preview-sample-01.org-0')).toBeVisible();
+  await expect(page.getByText('* TODO [#A] Morning habit 1 :habit:mobile:')).toHaveCount(0);
   await screenshot(page, '01-library-loaded');
 
   await measureResponsive('document open', responsivenessBudgetsMs.documentOpen, async () => {
@@ -103,12 +105,22 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
   await measureWidget('open dark source edit lane', async () => {
     await page.getByTestId('document-action-edit-source').click();
     await expect(page.getByTestId('document-edit-lane')).toBeVisible();
+    await expect(page.getByTestId('document-edit-source-highlight')).toBeVisible();
+    await expect(page.locator('[data-testid^="source-token-keyword-"]').first()).toBeVisible();
+    await expect(page.locator('[data-testid^="source-token-todo-"]').first()).toBeVisible();
   });
   await screenshot(page, '02c-document-dark-edit-lane');
   const editBackground = await page.getByTestId('document-edit-source').evaluate((node) =>
     window.getComputedStyle(node).backgroundColor
   );
   expect(editBackground).not.toBe('rgb(255, 255, 255)');
+  for (const chromeTestId of ['document-top-bar', 'document-mode-bar', 'document-bottom-toolbar']) {
+    const chromeBackground = await page.getByTestId(chromeTestId).evaluate((node) =>
+      window.getComputedStyle(node).backgroundColor
+    );
+    expect(chromeBackground, `${chromeTestId} should follow dark document chrome`).not.toBe('rgb(250, 249, 253)');
+    expect(chromeBackground, `${chromeTestId} should not use the light toolbar background`).not.toBe('rgb(236, 236, 246)');
+  }
   const sourceInput = page.getByTestId('document-edit-source');
   await measureWidget('cancel source edit lane', async () => {
     await sourceInput.fill(`${await sourceInput.inputValue()}
