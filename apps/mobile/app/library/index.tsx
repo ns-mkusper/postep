@@ -14,6 +14,7 @@ import {
   Platform,
   StatusBar,
   useWindowDimensions,
+  useColorScheme,
   type GestureResponderEvent,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
@@ -35,6 +36,7 @@ import {
   measureInteraction,
   moveRawBlock,
   updateRawBlock,
+  type LexicalProjectionNode,
   type OrgBlockViewModel,
 } from "../../lib/orgLexicalModel";
 import {
@@ -43,6 +45,24 @@ import {
   resolveDocumentPath,
   updateDocumentForConfig,
 } from "../../lib/documentSources";
+import {
+  archiveHeading,
+  copyHeadingBlock,
+  cutHeadingBlock,
+  findHeadingRange,
+  headingChoices,
+  insertHeading,
+  moveHeading,
+  pasteHeadingBlock,
+  refileHeadingUnder,
+  setHeadingPriority,
+  setHeadingState,
+  setPlanningTimestamp,
+  timestampShortcut,
+  toggleHeadingState,
+  type HeadingPlacement,
+  type MoveKind,
+} from "../../lib/orgDocumentActions";
 
 type NoteLine = {
   text: string;
@@ -76,6 +96,18 @@ type ChecklistItem = {
   checked: boolean;
   lineStart: number;
 };
+
+type DocumentDialog =
+  | "overflow"
+  | "paste"
+  | "move"
+  | "refile"
+  | "schedule"
+  | "deadline"
+  | "priority"
+  | "state"
+  | "add"
+  | null;
 
 type DocumentActionIcon =
   | "cut"
@@ -684,6 +716,38 @@ function toggleRawCheckbox(raw: string, lineStart: number): string {
   return raw;
 }
 
+type DocumentEditTheme = {
+  background: string;
+  inputBackground: string;
+  text: string;
+  muted: string;
+  border: string;
+  placeholder: string;
+  selection: string;
+};
+
+function documentEditTheme(dark: boolean): DocumentEditTheme {
+  return dark
+    ? {
+        background: "#071008",
+        inputBackground: "#0C150B",
+        text: "#F2F5EC",
+        muted: "#A7AEA0",
+        border: "#303B2D",
+        placeholder: "#6F7769",
+        selection: "#7F9F52",
+      }
+    : {
+        background: "#FAF9FD",
+        inputBackground: "#FFFFFF",
+        text: "#252832",
+        muted: "#6B7280",
+        border: "#DADAE4",
+        placeholder: "#9CA3AF",
+        selection: "#AFC0FF",
+      };
+}
+
 export default function LibraryScreen() {
   const queryClient = useQueryClient();
   const bridgeConfig = useBridgeConfig();
@@ -703,6 +767,16 @@ export default function LibraryScreen() {
   const [interactionStatus, setInteractionStatus] = useState<string | null>(
     null,
   );
+  const [selectedDocumentKey, setSelectedDocumentKey] = useState<string | null>(null);
+  const [selectedDocumentLine, setSelectedDocumentLine] = useState<number | null>(null);
+  const [activeDocumentDialog, setActiveDocumentDialog] = useState<DocumentDialog>(null);
+  const [clipboardBlock, setClipboardBlock] = useState("");
+  const [isEditingDocument, setIsEditingDocument] = useState(false);
+  const [documentDraftRaw, setDocumentDraftRaw] = useState("");
+  const [newHeadingTitle, setNewHeadingTitle] = useState("New item");
+  const colorScheme = useColorScheme();
+  const isDarkMode = colorScheme === "dark";
+  const editTheme = documentEditTheme(isDarkMode);
   const { width } = useWindowDimensions();
   const numColumns = width >= 360 ? 2 : 1;
   const hasConfiguredRoots =
@@ -751,6 +825,14 @@ export default function LibraryScreen() {
       }
     }
   }, [documentsQuery.data, selectedPath]);
+
+  useEffect(() => {
+    setSelectedDocumentKey(null);
+    setSelectedDocumentLine(null);
+    setActiveDocumentDialog(null);
+    setIsEditingDocument(false);
+    setDocumentDraftRaw("");
+  }, [selectedPath]);
 
   const previewsQuery = useQuery({
     queryKey: [
@@ -827,6 +909,12 @@ export default function LibraryScreen() {
     enabled: Boolean(selectedPath) && hasConfiguredRoots,
     queryFn: () => loadDocumentForConfig(bridgeConfig, selectedPath!),
   });
+
+  useEffect(() => {
+    if (!isEditingDocument) {
+      setDocumentDraftRaw(documentQuery.data?.raw ?? "");
+    }
+  }, [documentQuery.data?.raw, isEditingDocument]);
 
   const blockModel = useMemo(
     () =>
@@ -941,6 +1029,92 @@ export default function LibraryScreen() {
     });
     setInteractionStatus(`${label} ${metric.elapsedMs.toFixed(2)}ms`);
   };
+
+  const rawDocument = documentQuery.data?.raw ?? "";
+  const selectedActionLine = selectedDocumentLine ?? findHeadingRange(rawDocument, null)?.start ?? 0;
+
+  const selectDocumentNode = (
+    node: LexicalProjectionNode,
+    _index: number,
+    key: string,
+  ) => {
+    setSelectedDocumentKey(key);
+    setSelectedDocumentLine(node.lineStart ?? null);
+  };
+
+  const persistDocumentAction = (nextRaw: string, label: string) => {
+    if (nextRaw === rawDocument) {
+      setInteractionStatus(`${label} no change`);
+      return;
+    }
+    void persistRaw(nextRaw, label);
+  };
+
+  const openEditor = () => {
+    setDocumentDraftRaw(rawDocument);
+    setIsEditingDocument(true);
+    setActiveDocumentDialog(null);
+  };
+
+  const saveDocumentEdit = () => {
+    persistDocumentAction(documentDraftRaw, "documentEdit");
+    setIsEditingDocument(false);
+  };
+
+  const cancelDocumentEdit = () => {
+    setDocumentDraftRaw(rawDocument);
+    setIsEditingDocument(false);
+  };
+
+  const cutSelectedItem = () => {
+    const result = cutHeadingBlock(rawDocument, selectedActionLine);
+    setClipboardBlock(result.block);
+    persistDocumentAction(result.raw, "documentCut");
+  };
+
+  const copySelectedItem = () => {
+    const block = copyHeadingBlock(rawDocument, selectedActionLine);
+    setClipboardBlock(block);
+    setInteractionStatus("documentCopy ready");
+  };
+
+  const pasteSelectedItem = (placement: HeadingPlacement) => {
+    persistDocumentAction(
+      pasteHeadingBlock(rawDocument, clipboardBlock, selectedActionLine, placement),
+      `documentPaste:${placement}`,
+    );
+    setActiveDocumentDialog(null);
+  };
+
+  const moveSelectedItem = (move: MoveKind) => {
+    persistDocumentAction(moveHeading(rawDocument, selectedActionLine, move), `documentMove:${move}`);
+    setActiveDocumentDialog(null);
+  };
+
+  const setPlanningFromShortcut = (
+    keyword: "SCHEDULED" | "DEADLINE",
+    shortcut: "today" | "tomorrow" | "clear",
+  ) => {
+    const timestamp = shortcut === "clear" ? null : timestampShortcut(shortcut);
+    persistDocumentAction(
+      setPlanningTimestamp(rawDocument, selectedActionLine, keyword, timestamp),
+      `document${keyword}`,
+    );
+    setActiveDocumentDialog(null);
+  };
+
+  const createHeading = (placement: HeadingPlacement) => {
+    persistDocumentAction(
+      insertHeading(rawDocument, newHeadingTitle, selectedActionLine, placement),
+      `documentAdd:${placement}`,
+    );
+    setNewHeadingTitle("New item");
+    setActiveDocumentDialog(null);
+  };
+
+  const refileTargets = headingChoices(rawDocument)
+    .filter((heading) => heading.lineStart !== selectedActionLine)
+    .slice(0, 8);
 
   const startEditing = (block: OrgBlockViewModel) => {
     setEditingBlockId(block.id);
@@ -1272,6 +1446,230 @@ export default function LibraryScreen() {
     </View>
   );
 
+  const closeDocumentDialog = () => setActiveDocumentDialog(null);
+
+  const applyHeadingState = (state: string | null) => {
+    persistDocumentAction(
+      setHeadingState(rawDocument, selectedActionLine, state),
+      state ? `documentState:${state}` : "documentState:clear",
+    );
+    closeDocumentDialog();
+  };
+
+  const applyHeadingPriority = (priority: string | null) => {
+    persistDocumentAction(
+      setHeadingPriority(rawDocument, selectedActionLine, priority),
+      priority ? `documentPriority:${priority}` : "documentPriority:clear",
+    );
+    closeDocumentDialog();
+  };
+
+  const archiveSelectedItem = () => {
+    persistDocumentAction(
+      archiveHeading(rawDocument, selectedActionLine),
+      "documentArchive",
+    );
+    closeDocumentDialog();
+  };
+
+  const toggleSelectedState = () => {
+    persistDocumentAction(
+      toggleHeadingState(rawDocument, selectedActionLine),
+      "documentState:toggle",
+    );
+    closeDocumentDialog();
+  };
+
+  const refileSelectedItem = (targetLineStart: number) => {
+    persistDocumentAction(
+      refileHeadingUnder(rawDocument, selectedActionLine, targetLineStart),
+      "documentRefile",
+    );
+    closeDocumentDialog();
+  };
+
+  const renderDialogButton = (
+    label: string,
+    onPress: () => void,
+    testID: string,
+    secondary = false,
+  ) => (
+    <TouchableOpacity
+      key={testID}
+      style={[
+        secondary ? styles.documentDialogButtonSecondary : styles.documentDialogButton,
+        secondary ? { backgroundColor: editTheme.inputBackground, borderColor: editTheme.border } : null,
+      ]}
+      onPress={onPress}
+      testID={testID}
+    >
+      <Text
+        style={[
+          secondary
+            ? styles.documentDialogButtonSecondaryText
+            : styles.documentDialogButtonText,
+          secondary ? { color: editTheme.text } : null,
+        ]}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+
+  const renderPlacementButtons = (
+    prefix: string,
+    action: (placement: HeadingPlacement) => void,
+  ) => (
+    <View style={styles.documentDialogActionGrid}>
+      {renderDialogButton("Above", () => action("above"), `${prefix}-above`)}
+      {renderDialogButton("Under", () => action("under"), `${prefix}-under`)}
+      {renderDialogButton("Below", () => action("below"), `${prefix}-below`)}
+    </View>
+  );
+
+  const documentDialogTitle =
+    activeDocumentDialog === "overflow"
+      ? "Document actions"
+      : activeDocumentDialog === "paste"
+        ? "Paste item"
+        : activeDocumentDialog === "move"
+          ? "Move item"
+          : activeDocumentDialog === "refile"
+            ? "Archive or refile"
+            : activeDocumentDialog === "schedule"
+              ? "Schedule"
+              : activeDocumentDialog === "deadline"
+                ? "Deadline"
+                : activeDocumentDialog === "priority"
+                  ? "Priority"
+                  : activeDocumentDialog === "state"
+                    ? "State"
+                    : activeDocumentDialog === "add"
+                      ? "Add item"
+                      : "";
+
+  const documentDialogTestID = activeDocumentDialog
+    ? `document-${activeDocumentDialog === "overflow" ? "action" : activeDocumentDialog}-menu`
+    : undefined;
+
+  const renderDocumentDialogContent = () => {
+    if (activeDocumentDialog === "overflow") {
+      return (
+        <View style={styles.documentDialogSection}>
+          {renderDialogButton("Edit source", openEditor, "document-action-edit-source")}
+          {renderDialogButton(
+            readerMode ? "Reader off" : "Reader on",
+            () => {
+              setReaderMode((value) => !value);
+              closeDocumentDialog();
+            },
+            "document-action-toggle-reader",
+          )}
+          {renderDialogButton(
+            outlineOnly ? "Outline off" : "Outline on",
+            () => {
+              setOutlineOnly((value) => !value);
+              closeDocumentDialog();
+            },
+            "document-action-toggle-outline",
+          )}
+          {renderDialogButton("Toggle done", toggleSelectedState, "document-action-toggle-state")}
+        </View>
+      );
+    }
+    if (activeDocumentDialog === "paste") {
+      return clipboardBlock.trim() ? (
+        renderPlacementButtons("document-paste", pasteSelectedItem)
+      ) : (
+        <Text style={[styles.documentDialogHint, { color: editTheme.muted }]}>Copy or cut an item first.</Text>
+      );
+    }
+    if (activeDocumentDialog === "move") {
+      return (
+        <View style={styles.documentDialogActionGrid}>
+          {renderDialogButton("Up", () => moveSelectedItem("up"), "document-move-up")}
+          {renderDialogButton("Down", () => moveSelectedItem("down"), "document-move-down")}
+          {renderDialogButton("Promote", () => moveSelectedItem("promote"), "document-move-promote")}
+          {renderDialogButton("Demote", () => moveSelectedItem("demote"), "document-move-demote")}
+        </View>
+      );
+    }
+    if (activeDocumentDialog === "refile") {
+      return (
+        <View style={styles.documentDialogSection}>
+          {renderDialogButton("Archive here", archiveSelectedItem, "document-refile-archive")}
+          {refileTargets.length > 0 ? (
+            refileTargets.map((target) =>
+              renderDialogButton(
+                `${"  ".repeat(Math.max(target.depth - 1, 0))}${target.title}`,
+                () => refileSelectedItem(target.lineStart),
+                `document-refile-target-${target.lineStart}`,
+                true,
+              ),
+            )
+          ) : (
+            <Text style={[styles.documentDialogHint, { color: editTheme.muted }]}>No other headings available.</Text>
+          )}
+        </View>
+      );
+    }
+    if (activeDocumentDialog === "schedule" || activeDocumentDialog === "deadline") {
+      const keyword = activeDocumentDialog === "schedule" ? "SCHEDULED" : "DEADLINE";
+      const prefix = activeDocumentDialog === "schedule" ? "document-schedule" : "document-deadline";
+      return (
+        <View style={styles.documentDialogActionGrid}>
+          {renderDialogButton("Today", () => setPlanningFromShortcut(keyword, "today"), `${prefix}-today`)}
+          {renderDialogButton("Tomorrow", () => setPlanningFromShortcut(keyword, "tomorrow"), `${prefix}-tomorrow`)}
+          {renderDialogButton("Clear", () => setPlanningFromShortcut(keyword, "clear"), `${prefix}-clear`, true)}
+        </View>
+      );
+    }
+    if (activeDocumentDialog === "priority") {
+      return (
+        <View style={styles.documentDialogActionGrid}>
+          {renderDialogButton("A", () => applyHeadingPriority("A"), "document-priority-a")}
+          {renderDialogButton("B", () => applyHeadingPriority("B"), "document-priority-b")}
+          {renderDialogButton("C", () => applyHeadingPriority("C"), "document-priority-c")}
+          {renderDialogButton("Clear", () => applyHeadingPriority(null), "document-priority-clear", true)}
+        </View>
+      );
+    }
+    if (activeDocumentDialog === "state") {
+      return (
+        <View style={styles.documentDialogActionGrid}>
+          {["TODO", "NEXT", "DONE", "WAITING", "CANCELLED"].map((state) =>
+            renderDialogButton(state, () => applyHeadingState(state), `document-state-${state.toLowerCase()}`),
+          )}
+          {renderDialogButton("Clear", () => applyHeadingState(null), "document-state-clear", true)}
+        </View>
+      );
+    }
+    if (activeDocumentDialog === "add") {
+      return (
+        <View style={styles.documentDialogSection}>
+          <TextInput
+            testID="document-add-title"
+            style={[
+              styles.documentDialogInput,
+              {
+                backgroundColor: editTheme.inputBackground,
+                borderColor: editTheme.border,
+                color: editTheme.text,
+              },
+            ]}
+            value={newHeadingTitle}
+            onChangeText={setNewHeadingTitle}
+            placeholder="Heading title"
+            placeholderTextColor={editTheme.placeholder}
+            autoCapitalize="sentences"
+          />
+          {renderPlacementButtons("document-add", createHeading)}
+        </View>
+      );
+    }
+    return null;
+  };
+
   const drawerWidth = Math.min(width * 0.84, 360);
 
   return (
@@ -1348,6 +1746,41 @@ export default function LibraryScreen() {
             >
               <Text style={styles.drawerItemText}>⚙ Settings</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={activeDocumentDialog !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeDocumentDialog}
+        testID={documentDialogTestID ? `${documentDialogTestID}-modal` : undefined}
+      >
+        <View style={styles.documentDialogLayer}>
+          <Pressable
+            style={styles.documentDialogScrim}
+            onPress={closeDocumentDialog}
+            testID="document-dialog-scrim"
+          />
+          <View
+            style={[styles.documentDialogCard, { backgroundColor: editTheme.background }]}
+            testID={documentDialogTestID}
+          >
+            <View style={styles.documentDialogHeader}>
+              <Text style={[styles.documentDialogTitle, { color: editTheme.text }]}>{documentDialogTitle}</Text>
+              <TouchableOpacity
+                style={styles.documentDialogClose}
+                onPress={closeDocumentDialog}
+                testID="document-dialog-close"
+                accessibilityLabel="Close document dialog"
+              >
+                <Text style={[styles.documentDialogCloseText, { color: editTheme.muted }]}>×</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.documentDialogSubtitle, { color: editTheme.muted }]}>
+              Selected line {selectedActionLine + 1}
+            </Text>
+            {renderDocumentDialogContent()}
           </View>
         </View>
       </Modal>
@@ -1478,6 +1911,7 @@ export default function LibraryScreen() {
               style={styles.documentIconButton}
               accessibilityLabel="Cut selected item"
               testID="document-action-cut"
+              onPress={cutSelectedItem}
             >
               <GraphicalActionIcon name="cut" />
             </TouchableOpacity>
@@ -1485,6 +1919,7 @@ export default function LibraryScreen() {
               style={styles.documentIconButton}
               accessibilityLabel="Copy selected item"
               testID="document-action-copy"
+              onPress={copySelectedItem}
             >
               <GraphicalActionIcon name="copy" />
             </TouchableOpacity>
@@ -1492,6 +1927,7 @@ export default function LibraryScreen() {
               style={styles.documentIconButton}
               accessibilityLabel="Paste item"
               testID="document-action-paste"
+              onPress={() => setActiveDocumentDialog("paste")}
             >
               <GraphicalActionIcon name="paste" />
             </TouchableOpacity>
@@ -1499,6 +1935,7 @@ export default function LibraryScreen() {
               style={styles.documentIconButton}
               accessibilityLabel="Move selected item"
               testID="document-action-move"
+              onPress={() => setActiveDocumentDialog("move")}
             >
               <GraphicalActionIcon name="move" />
             </TouchableOpacity>
@@ -1506,6 +1943,7 @@ export default function LibraryScreen() {
               style={styles.documentIconButton}
               accessibilityLabel="More document actions"
               testID="document-action-overflow"
+              onPress={() => setActiveDocumentDialog("overflow")}
             >
               <GraphicalActionIcon name="overflow" />
             </TouchableOpacity>
@@ -1533,7 +1971,40 @@ export default function LibraryScreen() {
                 color="#5F6F85"
               />
             ) : documentQuery.data ? (
-              <LexicalDocument value={lexicalDocument.value.projection} />
+              isEditingDocument ? (
+                <View style={[styles.documentEditLane, { backgroundColor: editTheme.background, borderColor: editTheme.border }]} testID="document-edit-lane">
+                  <Text style={[styles.documentEditTitle, { color: editTheme.text }]}>Edit source</Text>
+                  <View style={styles.documentEditActions}>
+                    <TouchableOpacity style={styles.documentDialogButton} testID="document-edit-save" accessibilityLabel="Save" onPress={saveDocumentEdit}>
+                      <Text style={styles.documentDialogButtonText}>Save</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.documentDialogButtonSecondary} testID="document-edit-cancel" accessibilityLabel="Cancel" onPress={cancelDocumentEdit}>
+                      <Text style={styles.documentDialogButtonSecondaryText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TextInput
+                    testID="document-edit-source"
+                    accessibilityLabel="Edit document source"
+                    style={[styles.documentSourceInput, { backgroundColor: editTheme.inputBackground, color: editTheme.text, borderColor: editTheme.border }]}
+                    value={documentDraftRaw}
+                    onChangeText={setDocumentDraftRaw}
+                    multiline
+                    textAlignVertical="top"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="Org source"
+                    placeholderTextColor={editTheme.placeholder}
+                    selectionColor={editTheme.selection}
+                    showSoftInputOnFocus={process.env.EXPO_PUBLIC_POSTEP_E2E === "1" ? false : undefined}
+                  />
+                </View>
+              ) : (
+                <LexicalDocument
+                  value={lexicalDocument.value.projection}
+                  selectedKey={selectedDocumentKey}
+                  onSelectNode={selectDocumentNode}
+                />
+              )
             ) : (
               <Text style={styles.emptyDocument}>
                 Select an Org file to view its contents.
@@ -1546,6 +2017,7 @@ export default function LibraryScreen() {
               style={styles.orgBottomTool}
               accessibilityLabel="Archive or refile item"
               testID="document-bottom-archive"
+              onPress={() => setActiveDocumentDialog("refile")}
             >
               <GraphicalActionIcon name="archive" />
             </TouchableOpacity>
@@ -1553,6 +2025,7 @@ export default function LibraryScreen() {
               style={styles.orgBottomTool}
               accessibilityLabel="Schedule item"
               testID="document-bottom-schedule"
+              onPress={() => setActiveDocumentDialog("schedule")}
             >
               <GraphicalActionIcon name="calendar" />
             </TouchableOpacity>
@@ -1560,6 +2033,7 @@ export default function LibraryScreen() {
               style={styles.orgBottomTool}
               accessibilityLabel="Set item deadline"
               testID="document-bottom-deadline"
+              onPress={() => setActiveDocumentDialog("deadline")}
             >
               <GraphicalActionIcon name="deadline" />
             </TouchableOpacity>
@@ -1567,6 +2041,7 @@ export default function LibraryScreen() {
               style={styles.orgBottomTool}
               accessibilityLabel="Set item priority"
               testID="document-bottom-priority"
+              onPress={() => setActiveDocumentDialog("priority")}
             >
               <GraphicalActionIcon name="priority" />
             </TouchableOpacity>
@@ -1574,6 +2049,7 @@ export default function LibraryScreen() {
               style={styles.orgBottomTool}
               accessibilityLabel="Change item state"
               testID="document-bottom-state"
+              onPress={() => setActiveDocumentDialog("state")}
             >
               <GraphicalActionIcon name="state" />
             </TouchableOpacity>
@@ -1581,6 +2057,7 @@ export default function LibraryScreen() {
               style={styles.orgBottomTool}
               accessibilityLabel="Create new item"
               testID="document-bottom-add"
+              onPress={() => setActiveDocumentDialog("add")}
             >
               <GraphicalActionIcon name="add" />
             </TouchableOpacity>
@@ -1660,6 +2137,119 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: "#303B2D",
     marginVertical: 8,
+  },
+  documentDialogLayer: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  documentDialogScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.34)",
+  },
+  documentDialogCard: {
+    marginHorizontal: 12,
+    marginBottom: 18,
+    borderRadius: 22,
+    padding: 18,
+    backgroundColor: "#FAF9FD",
+    borderWidth: 1,
+    borderColor: "#DADAE4",
+    shadowColor: "#000000",
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  documentDialogHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 2,
+  },
+  documentDialogTitle: {
+    flex: 1,
+    color: "#252832",
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: "800",
+  },
+  documentDialogSubtitle: {
+    color: "#6B7280",
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 14,
+  },
+  documentDialogClose: {
+    width: 36,
+    height: 36,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#ECECF6",
+  },
+  documentDialogCloseText: {
+    color: "#30343F",
+    fontSize: 24,
+    lineHeight: 28,
+    fontWeight: "800",
+  },
+  documentDialogSection: { gap: 10 },
+  documentDialogActionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  documentDialogButton: {
+    minHeight: 44,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#4D5F31",
+    borderWidth: 1,
+    borderColor: "#6E814E",
+  },
+  documentDialogButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "800",
+  },
+  documentDialogButtonSecondary: {
+    minHeight: 44,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#ECECF6",
+    borderWidth: 1,
+    borderColor: "#DADAE4",
+  },
+  documentDialogButtonSecondaryText: {
+    color: "#30343F",
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "800",
+  },
+  documentDialogHint: {
+    color: "#6B7280",
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "600",
+  },
+  documentDialogInput: {
+    minHeight: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#DADAE4",
+    backgroundColor: "#FFFFFF",
+    color: "#252832",
+    paddingHorizontal: 14,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: "600",
   },
   postepHeader: {
     paddingTop: 8,
@@ -2386,6 +2976,33 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingBottom: 110,
     backgroundColor: "#FAF9FD",
+  },
+  documentEditLane: {
+    margin: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+  },
+  documentEditTitle: {
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: "800",
+    marginBottom: 10,
+  },
+  documentSourceInput: {
+    minHeight: 420,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 12,
+    fontSize: 15,
+    lineHeight: 22,
+    fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }),
+  },
+  documentEditActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginBottom: 12,
   },
   orgBottomToolbar: {
     position: "absolute",

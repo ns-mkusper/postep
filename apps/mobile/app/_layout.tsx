@@ -1,6 +1,6 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
-import { useColorScheme } from 'react-native';
+import { LogBox, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -8,6 +8,10 @@ import { useEffect, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import '../lib/registerContentUriModule';
 import { useOrgConfig } from '../store/orgConfig';
+
+if (__DEV__ && process.env.EXPO_PUBLIC_POSTEP_E2E === '1') {
+  LogBox.ignoreAllLogs(true);
+}
 
 export default function RootLayout() {
   const scheme = useColorScheme();

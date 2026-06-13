@@ -268,16 +268,41 @@ jobs:
         working-directory: ../postep-base/apps/mobile
         run: npm run e2e:android:build
 
+      - name: Free disk space before emulator capture
+        run: |
+          set -euo pipefail
+          mkdir -p apps/mobile/e2e-artifacts/apks
+          cp ../postep-base/apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk apps/mobile/e2e-artifacts/apks/base-app-debug.apk
+          echo "Disk usage before cleanup:"
+          df -h
+          du -sh apps/mobile/android ../postep-base/apps/mobile/android ~/.gradle ~/.npm 2>/dev/null || true
+          rm -rf \
+            apps/mobile/android \
+            ../postep-base/apps/mobile/android \
+            ~/.gradle/caches \
+            ~/.gradle/wrapper \
+            ~/.npm/_cacache
+          sudo rm -rf \
+            "$ANDROID_HOME/system-images" \
+            /usr/share/dotnet \
+            /usr/local/share/boost \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          docker image prune -af || true
+          echo "Disk usage after cleanup:"
+          df -h
+
       - name: Capture before and after emulator screenshots
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
-          target: google_apis
+          target: default
           arch: x86_64
           profile: pixel_6
           disable-animations: true
           script: |
-            bash -euo pipefail -c 'SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-before" METRICS_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-performance-before" APK_PATH="${{ github.workspace }}/../postep-base/apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk" METRO_PORT=8081 EXPO_LOG=/tmp/postep-base-expo-screenshots.log bash "${{ github.workspace }}/../postep-base/apps/mobile/e2e/capture-android-screenshots.sh"'
+            bash -euo pipefail -c 'SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-before" METRICS_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-performance-before" APK_PATH="${{ github.workspace }}/apps/mobile/e2e-artifacts/apks/base-app-debug.apk" METRO_PORT=8081 EXPO_LOG=/tmp/postep-base-expo-screenshots.log bash "${{ github.workspace }}/../postep-base/apps/mobile/e2e/capture-android-screenshots.sh"'
             adb shell am force-stop com.postep.mobile || true
             bash -euo pipefail -c 'SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-after" METRICS_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-performance-after" ANDROID_STRICT_DOCUMENT_ASSERTIONS=1 ANDROID_ENFORCE_PERFORMANCE_BUDGETS=1 APK_PATH="${{ github.workspace }}/apps/mobile/e2e-artifacts/apks/head-app-debug.apk" METRO_PORT=8081 EXPO_LOG=/tmp/postep-head-expo-screenshots.log bash "${{ github.workspace }}/apps/mobile/e2e/capture-android-screenshots.sh"'
 
@@ -307,7 +332,7 @@ jobs:
 
       - name: Publish screenshots branch
         id: publish
-        if: always() && hashFiles('apps/mobile/e2e-artifacts/android-screenshots-after/*.png') != ''
+        if: success() && hashFiles('apps/mobile/e2e-artifacts/android-screenshots-after/*.png') != ''
         run: |
           set -euo pipefail
           PR_NUMBER="${{ github.event.pull_request.number }}"
@@ -349,18 +374,33 @@ jobs:
           MARKER="<!-- postep-android-emulator-screenshots-pr-${PR_NUMBER} -->"
           RAW_BASE="https://raw.githubusercontent.com/${REPO}/${SCREENSHOT_BRANCH}/${SCREENSHOT_DIR}"
           BODY_FILE="$(mktemp)"
-          cat > "$BODY_FILE" <<EOF_COMMENT
-          ${MARKER}
-          Android emulator before/after screenshots for commit \`${SOURCE_SHA}\`:
+          {
+            printf '%s\n' "${MARKER}"
+            printf 'Android emulator before/after screenshots for commit `%s`:\n\n' "${SOURCE_SHA}"
+            printf '| Screen | Before | After | Diff |\n'
+            printf '| --- | --- | --- | --- |\n'
 
-          | Screen | Before | After | Diff |
-          | --- | --- | --- | --- |
-          | Library | ![Library before](${RAW_BASE}/before/01-library-loaded.png) | ![Library after](${RAW_BASE}/after/01-library-loaded.png) | ![Library diff](${RAW_BASE}/diff/01-library-loaded.diff.png) |
-          | Document editor | ![Document editor before](${RAW_BASE}/before/02-document-opened.png) | ![Document editor after](${RAW_BASE}/after/02-document-opened.png) | ![Document editor diff](${RAW_BASE}/diff/02-document-opened.diff.png) |
-          | Agenda | ![Agenda before](${RAW_BASE}/before/03-agenda.png) | ![Agenda after](${RAW_BASE}/after/03-agenda.png) | ![Agenda diff](${RAW_BASE}/diff/03-agenda.diff.png) |
-          | Habits | ![Habits before](${RAW_BASE}/before/04-habits.png) | ![Habits after](${RAW_BASE}/after/04-habits.png) | ![Habits diff](${RAW_BASE}/diff/04-habits.diff.png) |
-          | Roam graph | ![Roam graph before](${RAW_BASE}/before/05-roam-graph.png) | ![Roam graph after](${RAW_BASE}/after/05-roam-graph.png) | ![Roam graph diff](${RAW_BASE}/diff/05-roam-graph.diff.png) |
-          EOF_COMMENT
+            while IFS= read -r after_path; do
+              file="$(basename "$after_path")"
+              base="${file%.png}"
+              label="$(printf '%s' "$base" | sed -E 's/^[0-9]+-//; s/-/ /g; s/\b(.)/\u\1/g')"
+              before_cell="—"
+              diff_cell="—"
+              if [[ -f "apps/mobile/e2e-artifacts/android-screenshots-before/${file}" ]]; then
+                before_cell="![${label} before](${RAW_BASE}/before/${file})"
+              fi
+              if [[ -f "apps/mobile/e2e-artifacts/android-screenshots-diff/${base}.diff.png" ]]; then
+                diff_cell="![${label} diff](${RAW_BASE}/diff/${base}.diff.png)"
+              fi
+              printf '| %s | %s | ![%s after](%s/after/%s) | %s |\n' \
+                "$label" \
+                "$before_cell" \
+                "$label" \
+                "$RAW_BASE" \
+                "$file" \
+                "$diff_cell"
+            done < <(find apps/mobile/e2e-artifacts/android-screenshots-after -maxdepth 1 -type f -name '*.png' | sort)
+          } > "$BODY_FILE"
 
           COMMENT_ID="$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" --paginate --jq ".[] | select(.body | contains(\"${MARKER}\")) | .id" | tail -n 1)"
           BODY="$(cat "$BODY_FILE")"

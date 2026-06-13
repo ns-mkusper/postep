@@ -20,6 +20,10 @@ async function measureResponsive<T>(label: string, budgetMs: number, action: () 
   return result;
 }
 
+async function measureWidget<T>(label: string, action: () => Promise<T>): Promise<T> {
+  return measureResponsive(label, responsivenessBudgetsMs.actionTap, action);
+}
+
 async function screenshot(page: Page, name: string) {
   await mkdir(screenshotDir, { recursive: true });
   await page.screenshot({ path: `${screenshotDir}/${name}.png`, fullPage: true });
@@ -76,9 +80,142 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
     await expect(page.getByLabel(label)).toBeVisible();
   }
 
-  await measureResponsive('action button tap dispatch', responsivenessBudgetsMs.actionTap, async () => {
-    await page.getByTestId('document-action-overflow').click();
+  await expect(page.getByText('* TODO [#A] Morning habit 1 :habit:mobile:')).toHaveCount(0);
+  await expect(page.getByText('[[id:sample-10][Related sample 10]]')).toHaveCount(0);
+
+  await measureWidget('select document node', async () => {
+    await page.getByTestId('document-node-1').click();
   });
+  await screenshot(page, '02a-document-node-selected');
+
+  await measureWidget('copy selected document node', async () => {
+    await page.getByTestId('document-action-copy').click();
+  });
+
+  await measureWidget('overflow action menu', async () => {
+    await page.getByTestId('document-action-overflow').click();
+    await expect(page.getByTestId('document-action-menu')).toBeVisible();
+  });
+  await expect(page.getByTestId('document-action-edit-source')).toBeVisible();
+  await screenshot(page, '02b-document-overflow-menu');
+
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await measureWidget('open dark source edit lane', async () => {
+    await page.getByTestId('document-action-edit-source').click();
+    await expect(page.getByTestId('document-edit-lane')).toBeVisible();
+  });
+  await screenshot(page, '02c-document-dark-edit-lane');
+  const editBackground = await page.getByTestId('document-edit-source').evaluate((node) =>
+    window.getComputedStyle(node).backgroundColor
+  );
+  expect(editBackground).not.toBe('rgb(255, 255, 255)');
+  const sourceInput = page.getByTestId('document-edit-source');
+  await measureWidget('cancel source edit lane', async () => {
+    await sourceInput.fill(`${await sourceInput.inputValue()}
+* Added from edit lane`);
+    await page.getByTestId('document-edit-cancel').click();
+    await expect(page.getByText('Added from edit lane')).toHaveCount(0);
+  });
+
+  await measureWidget('reopen source edit lane', async () => {
+    await page.getByTestId('document-action-overflow').click();
+    await page.getByTestId('document-action-edit-source').click();
+    await expect(page.getByTestId('document-edit-lane')).toBeVisible();
+  });
+  await measureWidget('save source edit lane', async () => {
+    await sourceInput.fill(`${await sourceInput.inputValue()}
+* Added from edit lane`);
+    await page.getByTestId('document-edit-save').click();
+    await expect(page.getByText('Added from edit lane')).toBeVisible();
+  });
+  await screenshot(page, '02d-document-edit-saved');
+
+  await measureWidget('paste placement menu', async () => {
+    await page.getByTestId('document-action-paste').click();
+    await expect(page.getByTestId('document-paste-menu')).toBeVisible();
+  });
+  await screenshot(page, '02e-document-paste-menu');
+  await measureWidget('paste copied item below', async () => {
+    await page.getByTestId('document-paste-below').click();
+    await expect(page.getByText('Morning habit 1', { exact: true })).toHaveCount(2);
+  });
+
+  await measureWidget('move item menu', async () => {
+    await page.getByTestId('document-action-move').click();
+    await expect(page.getByTestId('document-move-menu')).toBeVisible();
+  });
+  await screenshot(page, '02f-document-move-menu');
+  await measureWidget('demote selected item', async () => {
+    await page.getByTestId('document-move-demote').click();
+    await expect(page.getByTestId('document-move-menu')).toHaveCount(0);
+  });
+
+  await measureWidget('schedule item menu', async () => {
+    await page.getByTestId('document-bottom-schedule').click();
+    await expect(page.getByTestId('document-schedule-menu')).toBeVisible();
+  });
+  await screenshot(page, '02g-document-schedule-menu');
+  await measureWidget('schedule item today', async () => {
+    await page.getByTestId('document-schedule-today').click();
+    await expect(page.getByText(/Scheduled \d{4}-|\d{4}-/).first()).toBeVisible();
+  });
+
+  await measureWidget('deadline item menu', async () => {
+    await page.getByTestId('document-bottom-deadline').click();
+    await expect(page.getByTestId('document-deadline-menu')).toBeVisible();
+  });
+  await screenshot(page, '02h-document-deadline-menu');
+  await measureWidget('deadline item tomorrow', async () => {
+    await page.getByTestId('document-deadline-tomorrow').click();
+    await expect(page.getByText(/Deadline|Due|\d{4}-/).first()).toBeVisible();
+  });
+
+  await measureWidget('priority item menu', async () => {
+    await page.getByTestId('document-bottom-priority').click();
+    await expect(page.getByTestId('document-priority-menu')).toBeVisible();
+  });
+  await screenshot(page, '02i-document-priority-menu');
+  await measureWidget('set item priority', async () => {
+    await page.getByTestId('document-priority-b').click();
+    await expect(page.getByText('#B').first()).toBeVisible();
+  });
+
+  await measureWidget('state item menu', async () => {
+    await page.getByTestId('document-bottom-state').click();
+    await expect(page.getByTestId('document-state-menu')).toBeVisible();
+  });
+  await screenshot(page, '02j-document-state-menu');
+  await measureWidget('set item state', async () => {
+    await page.getByTestId('document-state-next').click();
+    await expect(page.getByText('NEXT').first()).toBeVisible();
+  });
+
+  await measureWidget('add heading menu', async () => {
+    await page.getByTestId('document-bottom-add').click();
+    await expect(page.getByTestId('document-add-menu')).toBeVisible();
+  });
+  await screenshot(page, '02k-document-add-menu');
+  await measureWidget('add heading below', async () => {
+    await page.getByTestId('document-add-title').fill('Action added heading');
+    await page.getByTestId('document-add-below').click();
+    await expect(page.getByText('Action added heading')).toBeVisible();
+  });
+
+  await measureWidget('archive/refile menu', async () => {
+    await page.getByTestId('document-bottom-archive').click();
+    await expect(page.getByTestId('document-refile-menu')).toBeVisible();
+  });
+  await screenshot(page, '02l-document-refile-menu');
+  await measureWidget('archive selected item', async () => {
+    await page.getByTestId('document-refile-archive').click();
+    await expect(page.getByText('#ARCHIVE').first()).toBeVisible();
+  });
+
+  await measureWidget('cut selected item', async () => {
+    await page.getByTestId('document-action-cut').click();
+    await expect(page.getByText('Morning habit 1', { exact: true }).first()).toBeVisible();
+  });
+  await screenshot(page, '02m-document-actions-result');
 
   const firstFold = page.getByLabel('Collapse item').first();
   await expect(firstFold).toBeVisible();

@@ -17,6 +17,7 @@ ANDROID_ENFORCE_PERFORMANCE_BUDGETS="${ANDROID_ENFORCE_PERFORMANCE_BUDGETS:-0}"
 ANDROID_BUDGET_ROUTE_MS="${ANDROID_BUDGET_ROUTE_MS:-15000}"
 ANDROID_BUDGET_DOCUMENT_OPEN_MS="${ANDROID_BUDGET_DOCUMENT_OPEN_MS:-15000}"
 ANDROID_BUDGET_ACTION_LABELS_MS="${ANDROID_BUDGET_ACTION_LABELS_MS:-15000}"
+ANDROID_BUDGET_WIDGET_ACTION_MS="${ANDROID_BUDGET_WIDGET_ACTION_MS:-20000}"
 ANDROID_BUDGET_FOLD_TOGGLE_MS="${ANDROID_BUDGET_FOLD_TOGGLE_MS:-20000}"
 ANDROID_BUDGET_SCROLL_MS="${ANDROID_BUDGET_SCROLL_MS:-4000}"
 ANDROID_BUDGET_LAUNCH_BUNDLE_MS="${ANDROID_BUDGET_LAUNCH_BUNDLE_MS:-120000}"
@@ -156,9 +157,9 @@ tap_xml_text() {
   local bounds
   local x1 y1 x2 y2 x y
 
-  node="$(grep -o "<node[^>]*text=\"${label}\"[^>]*>" <<<"$xml" | head -n 1 || true)"
+  node="$(grep -o "<node[^>]*content-desc=\"${label}\"[^>]*>" <<<"$xml" | head -n 1 || true)"
   if [[ -z "$node" ]]; then
-    node="$(grep -o "<node[^>]*content-desc=\"${label}\"[^>]*>" <<<"$xml" | head -n 1 || true)"
+    node="$(grep -o "<node[^>]*text=\"${label}\"[^>]*>" <<<"$xml" | head -n 1 || true)"
   fi
   if [[ -z "$node" ]]; then
     return 1
@@ -175,21 +176,35 @@ tap_xml_text() {
   adb_cmd shell input tap "$x" "$y" || true
 }
 
+is_launcher_xml() {
+  grep -Eiq 'package="com\.android\.launcher3"|Pixel Launcher|Launcher3|nexuslauncher'
+}
+
 dismiss_system_dialogs() {
   local xml
 
   for _ in $(seq 1 3); do
     xml="$(window_xml || true)"
-    if ! grep -Eiq "Pixel Launcher|Launcher3|nexuslauncher|isn.?t responding|Close app" <<<"$xml"; then
-      return 0
+    if grep -Eiq "Console Warning|Console Error|Log [0-9]+ of [0-9]+|Component Stack" <<<"$xml"; then
+      log "Dismissing React Native LogBox before screenshot capture"
+      tap_xml_text "$xml" "Dismiss" || \
+        tap_xml_text "$xml" "Minimize" || \
+        adb_cmd shell input keyevent KEYCODE_ESCAPE || true
+      sleep 1
+      continue
     fi
 
-    log "Dismissing Android system dialog before screenshot capture"
-    tap_xml_text "$xml" "Wait" || \
-      tap_xml_text "$xml" "OK" || \
-      tap_xml_text "$xml" "Close app" || \
-      adb_cmd shell input keyevent KEYCODE_ESCAPE || true
-    sleep 1
+    if grep -Eiq "isn.?t responding|Close app" <<<"$xml"; then
+      log "Dismissing Android system dialog before screenshot capture"
+      tap_xml_text "$xml" "Wait" || \
+        tap_xml_text "$xml" "OK" || \
+        tap_xml_text "$xml" "Close app" || \
+        adb_cmd shell input keyevent KEYCODE_ESCAPE || true
+      sleep 1
+      continue
+    fi
+
+    return 0
   done
 }
 
@@ -215,6 +230,26 @@ wait_for_text() {
   done
 
   log "Timed out waiting for text: ${expected_texts[*]}"
+  window_xml || true
+  return 1
+}
+
+wait_for_text_absent() {
+  local timeout_seconds="$1"
+  local unexpected_text="$2"
+  local deadline=$((SECONDS + timeout_seconds))
+
+  while (( SECONDS < deadline )); do
+    local xml
+    dismiss_system_dialogs
+    xml="$(window_xml || true)"
+    if [[ -n "$xml" ]] && ! grep -Fq "$unexpected_text" <<<"$xml"; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  log "Timed out waiting for text to disappear: $unexpected_text"
   window_xml || true
   return 1
 }
@@ -319,33 +354,186 @@ verify_document_actions() {
     "Create new item"
 }
 
-toggle_first_fold_control() {
+tap_accessible_label() {
+  local label="$1"
   local xml
 
   xml="$(window_xml || true)"
-  if ! grep -Fq "Collapse item" <<<"$xml"; then
-    log "Fold control did not expose Collapse item"
+  if ! tap_xml_text "$xml" "$label"; then
+    log "Could not tap accessibility label or text: $label"
     window_xml || true
     return 1
+  fi
+  sleep 1
+}
+
+tap_label_and_wait() {
+  local label="$1"
+  local timeout_seconds="$2"
+  shift 2
+
+  tap_accessible_label "$label"
+  wait_for_all_text "$timeout_seconds" "$@"
+}
+
+close_document_dialog() {
+  local xml
+
+  dismiss_system_dialogs
+  xml="$(window_xml || true)"
+  if grep -Fq "Close document dialog" <<<"$xml"; then
+    tap_xml_text "$xml" "Close document dialog" || true
+  else
+    adb_cmd shell input keyevent KEYCODE_BACK || true
+  fi
+  wait_for_text 30 "More document actions"
+  sleep 1
+  dismiss_system_dialogs
+}
+
+wait_for_document_toolbar() {
+  local timeout_seconds="$1"
+  shift
+
+  dismiss_system_dialogs
+  wait_for_all_text "$timeout_seconds" "More document actions" "$@"
+}
+
+close_document_editor() {
+  local xml
+  local relaunched
+
+  for _ in $(seq 1 6); do
+    relaunched=0
+    dismiss_system_dialogs
+    xml="$(window_xml || true)"
+
+    if is_launcher_xml <<<"$xml"; then
+      relaunched=1
+      log "App left foreground while closing editor; relaunching app"
+      adb_cmd shell am start -W -n "$APP_ACTIVITY" >/dev/null || adb_cmd shell monkey -p "$APP_ID" 1 >/dev/null || true
+      sleep 4
+      dismiss_system_dialogs
+      xml="$(window_xml || true)"
+    fi
+
+    if ! grep -Fq "Edit document source" <<<"$xml"; then
+      if wait_for_text 10 "More document actions"; then
+        return 0
+      fi
+      if [[ "$relaunched" == "1" ]]; then
+        open_route "library"
+        open_first_document
+        return 0
+      fi
+      sleep 1
+      continue
+    fi
+
+    tap_xml_text "$xml" "Cancel" || adb_cmd shell input tap 892 1776 || true
+    if wait_for_text_absent 10 "Edit document source"; then
+      wait_for_text 30 "More document actions"
+      return 0
+    fi
+
+    adb_cmd shell input swipe 540 1750 540 720 300 || true
+    sleep 1
+  done
+
+  log "Could not close document edit lane"
+  window_xml || true
+  return 1
+}
+
+capture_widget_dialog() {
+  local metric_name="$1"
+  local open_label="$2"
+  local screenshot_name="$3"
+  shift 3
+
+  wait_for_document_toolbar 30 "$open_label"
+  measure_step "$metric_name" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_label_and_wait "$open_label" 30 "$@"
+  capture "$screenshot_name" "$@"
+  measure_step "${metric_name}_close" "$ANDROID_BUDGET_WIDGET_ACTION_MS" close_document_dialog
+  wait_for_document_toolbar 30 "$open_label"
+}
+
+verify_document_widgets() {
+  measure_step "document_select_item_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_label_and_wait "Select document item" 30 "Copy selected item"
+  capture "03-document-node-selected" "Copy selected item"
+
+  measure_step "document_copy_item_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_accessible_label "Copy selected item"
+
+  measure_step "document_overflow_menu_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_label_and_wait "More document actions" 30 "Edit source"
+  capture "04-document-overflow-menu" "Edit source"
+  measure_step "document_edit_lane_open_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" tap_label_and_wait "Edit source" 30 "Edit document source"
+  capture "05-document-edit-source" "Edit document source"
+  measure_step "document_edit_lane_cancel_ms" "$ANDROID_BUDGET_WIDGET_ACTION_MS" close_document_editor
+
+  capture_widget_dialog "document_paste_menu_ms" "Paste item" "06-document-paste-menu" "Paste item" "Above" "Under" "Below"
+  capture_widget_dialog "document_move_menu_ms" "Move selected item" "07-document-move-menu" "Move item" "Promote" "Demote"
+  capture_widget_dialog "document_schedule_menu_ms" "Schedule item" "08-document-schedule-menu" "Schedule" "Today" "Tomorrow"
+  capture_widget_dialog "document_deadline_menu_ms" "Set item deadline" "09-document-deadline-menu" "Deadline" "Today" "Tomorrow"
+  capture_widget_dialog "document_priority_menu_ms" "Set item priority" "10-document-priority-menu" "Priority" "A" "B" "C"
+  capture_widget_dialog "document_state_menu_ms" "Change item state" "11-document-state-menu" "State" "TODO" "NEXT" "DONE"
+  capture_widget_dialog "document_add_menu_ms" "Create new item" "12-document-add-menu" "Add item" "Above" "Under" "Below"
+  capture_widget_dialog "document_refile_menu_ms" "Archive or refile item" "13-document-refile-menu" "Archive here"
+}
+
+toggle_first_fold_control() {
+  local xml
+  local found
+
+  found=0
+  for _ in $(seq 1 4); do
+    dismiss_system_dialogs
+    xml="$(window_xml || true)"
+    if grep -Fq "Edit document source" <<<"$xml"; then
+      close_document_editor || true
+      xml="$(window_xml || true)"
+    fi
+
+    if grep -Fq "Collapse item" <<<"$xml"; then
+      found=1
+      break
+    fi
+
+    adb_cmd shell input swipe 540 760 540 1550 250 || true
+    sleep 1
+  done
+
+  if [[ "$found" != "1" ]]; then
+    wait_for_text 8 "Collapse item"
+    xml="$(window_xml || true)"
   fi
 
-  tap_xml_text "$xml" "Collapse item"
-  sleep 1
-  xml="$(window_xml || true)"
-  if ! grep -Fq "Expand item" <<<"$xml"; then
-    log "Fold collapse did not expose Expand item"
-    window_xml || true
-    return 1
+  tap_xml_text "$xml" "Collapse item" || true
+  found=0
+  for _ in $(seq 1 6); do
+    dismiss_system_dialogs
+    xml="$(window_xml || true)"
+    if grep -Fq "Expand item" <<<"$xml"; then
+      tap_xml_text "$xml" "Expand item" || true
+      found=1
+      break
+    fi
+    sleep 1
+  done
+
+  if [[ "$found" == "1" ]]; then
+    for _ in $(seq 1 6); do
+      dismiss_system_dialogs
+      xml="$(window_xml || true)"
+      if grep -Fq "Collapse item" <<<"$xml"; then
+        return 0
+      fi
+      sleep 1
+    done
   fi
 
-  tap_xml_text "$xml" "Expand item"
-  sleep 1
-  xml="$(window_xml || true)"
-  if ! grep -Fq "Collapse item" <<<"$xml"; then
-    log "Fold expand did not restore Collapse item"
-    window_xml || true
-    return 1
-  fi
+  log "Fold collapse did not expose Expand item"
+  window_xml || true
+  return 1
 }
 
 scroll_document_once() {
@@ -439,21 +627,22 @@ capture "01-library-loaded" "Local Org"
 measure_step "document_open_ms" "$ANDROID_BUDGET_DOCUMENT_OPEN_MS" open_first_document
 if [[ "$ANDROID_STRICT_DOCUMENT_ASSERTIONS" == "1" ]]; then
   measure_step "document_action_labels_ms" "$ANDROID_BUDGET_ACTION_LABELS_MS" verify_document_actions
-  measure_step "document_fold_toggle_ms" "$ANDROID_BUDGET_FOLD_TOGGLE_MS" toggle_first_fold_control
 fi
 capture "02-document-opened" "open app workflow"
 if [[ "$ANDROID_STRICT_DOCUMENT_ASSERTIONS" == "1" ]]; then
+  verify_document_widgets
+  measure_step "document_fold_toggle_ms" "$ANDROID_BUDGET_FOLD_TOGGLE_MS" toggle_first_fold_control
   measure_step "document_scroll_ms" "$ANDROID_BUDGET_SCROLL_MS" scroll_document_once
 fi
 
 measure_step "open_agenda_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route "agenda"
-capture "03-agenda" "Morning habit"
+capture "14-agenda" "Morning habit"
 
 measure_step "open_habits_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route "habits"
-capture "04-habits" "Morning habit"
+capture "15-habits" "Morning habit"
 
 measure_step "open_roam_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route "roam"
-capture "05-roam-graph" "Roam Nodes" "Knowledge Graph"
+capture "16-roam-graph" "Roam Nodes" "Knowledge Graph"
 
 write_metrics
 log "Screenshots ready"
