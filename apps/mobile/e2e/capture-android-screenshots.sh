@@ -229,6 +229,26 @@ wait_for_text() {
   return 1
 }
 
+wait_for_text_absent() {
+  local timeout_seconds="$1"
+  local unexpected_text="$2"
+  local deadline=$((SECONDS + timeout_seconds))
+
+  while (( SECONDS < deadline )); do
+    local xml
+    dismiss_system_dialogs
+    xml="$(window_xml || true)"
+    if [[ -n "$xml" ]] && ! grep -Fq "$unexpected_text" <<<"$xml"; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  log "Timed out waiting for text to disappear: $unexpected_text"
+  window_xml || true
+  return 1
+}
+
 wait_for_all_text() {
   local timeout_seconds="$1"
   shift
@@ -378,16 +398,26 @@ close_document_editor() {
   local xml
 
   for _ in $(seq 1 5); do
+    dismiss_system_dialogs
     xml="$(window_xml || true)"
-    if tap_xml_text "$xml" "Cancel"; then
+    if ! grep -Fq "Edit document source" <<<"$xml"; then
       wait_for_text 30 "More document actions"
       return 0
     fi
+
+    if tap_xml_text "$xml" "Cancel"; then
+      if wait_for_text_absent 10 "Edit document source"; then
+        wait_for_text 30 "More document actions"
+        return 0
+      fi
+    fi
+
+    adb_cmd shell input keyevent KEYCODE_BACK || true
     adb_cmd shell input swipe 540 1750 540 720 300 || true
     sleep 1
   done
 
-  log "Could not find document edit Cancel button"
+  log "Could not close document edit lane"
   window_xml || true
   return 1
 }
@@ -430,7 +460,20 @@ verify_document_widgets() {
 toggle_first_fold_control() {
   local xml
 
-  dismiss_system_dialogs
+  for _ in $(seq 1 3); do
+    dismiss_system_dialogs
+    xml="$(window_xml || true)"
+    if grep -Fq "Edit document source" <<<"$xml"; then
+      close_document_editor || true
+    fi
+
+    if wait_for_text 10 "Collapse item"; then
+      break
+    fi
+
+    adb_cmd shell input swipe 540 760 540 1550 250 || true
+    sleep 1
+  done
   wait_for_text 30 "Collapse item"
 
   for _ in $(seq 1 3); do
