@@ -32,6 +32,10 @@ export interface Habit {
     state: string;
   }>;
   last_repeat?: string | null;
+  path?: string;
+  headline_line?: number;
+  todo_keyword?: string | null;
+  timestamp_raw?: string | null;
 }
 
 export interface AgendaSnapshot {
@@ -421,7 +425,9 @@ function resolveNativeBinding(): NativeModule {
 function getNodeRequire(): NodeRequire | null {
   try {
     const requireNative = eval("require") as unknown;
-    return typeof requireNative === "function" ? (requireNative as NodeRequire) : null;
+    return typeof requireNative === "function"
+      ? (requireNative as NodeRequire)
+      : null;
   } catch {
     return null;
   }
@@ -898,6 +904,8 @@ function normalizeHabit(habit: Habit): Habit {
     scheduled: habit.scheduled ?? null,
     repeater: habit.repeater ?? null,
     last_repeat: habit.last_repeat ?? null,
+    todo_keyword: habit.todo_keyword ?? null,
+    timestamp_raw: habit.timestamp_raw ?? null,
   };
 }
 
@@ -1029,7 +1037,11 @@ const noNativeModule: NativeModule = {
   load_roam_graph: () => ({ nodes: [], links: [] }),
   list_documents: () => [],
   load_document: (_config, path) => ({ path, raw: "", lexical: [] }),
-  update_document: ({ path, raw }) => ({ path, raw, lexical: rawToLexical(raw) }),
+  update_document: ({ path, raw }) => ({
+    path,
+    raw,
+    lexical: rawToLexical(raw),
+  }),
   set_roots: () => {},
   set_agenda_status: () => ({ items: [], habits: [] }),
 };
@@ -1147,6 +1159,10 @@ function buildE2EAgendaSnapshot(): AgendaSnapshot {
             propertyDrawer?.properties.LAST_REPEAT?.match(
               /\[(\d{4}-\d{2}-\d{2})/,
             )?.[1] ?? null,
+          path,
+          headline_line: heading.line_start,
+          todo_keyword: heading.todo_keyword,
+          timestamp_raw: scheduled?.text ?? null,
         });
       }
     }
