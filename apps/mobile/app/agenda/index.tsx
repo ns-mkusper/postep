@@ -33,6 +33,13 @@ const STATUS_OPTIONS: Array<{ label: string; value: string }> = [
   { label: "CANCELLED (C)", value: "CANCELLED" },
 ];
 
+const QUICK_STATUS_OPTIONS = [
+  { label: "TODO", value: "TODO" },
+  { label: "Doing", value: "INPROG-TODO" },
+  { label: "Done", value: "DONE" },
+  { label: "Cancel", value: "CANCELLED" },
+];
+
 function localDateString(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -183,7 +190,7 @@ function cleanAgendaContext(context: string) {
     visible.push(cleanOrgText(line));
   }
 
-  return visible.filter(Boolean).slice(0, 3);
+  return visible.filter(Boolean).slice(0, 2);
 }
 
 function formatRepeater(item: AgendaItem) {
@@ -227,11 +234,16 @@ export default function AgendaScreen() {
   );
 
   const applyStatus = async (item: AgendaItem, status: string) => {
-    if (config.roots.length === 0) {
+    if (config.roots.length === 0 && (config.roamRoots?.length ?? 0) === 0) {
       return;
     }
     try {
-      const snapshot = await setAgendaStatusForConfig(config, item, status);
+      const snapshot = await setAgendaStatusForConfig(
+        config,
+        item,
+        status,
+        agendaQuery.data,
+      );
       queryClient.setQueryData(
         ["agenda", config.roots.join(":"), config.roamRoots?.join(":") ?? ""],
         snapshot,
@@ -313,6 +325,24 @@ export default function AgendaScreen() {
                     )}
                   </View>
                   <Text style={styles.cardTitle}>{agenda.title}</Text>
+                  <View style={styles.quickStatusRow}>
+                    {QUICK_STATUS_OPTIONS.map((option) => (
+                      <TouchableOpacity
+                        key={option.value}
+                        style={[
+                          styles.quickStatusButton,
+                          currentStatusLabel(agenda) === option.value &&
+                            styles.quickStatusButtonActive,
+                        ]}
+                        onPress={() => applyStatus(agenda, option.value)}
+                        testID={`agenda-quick-${option.value.toLowerCase()}-${agenda.headline_line}`}
+                      >
+                        <Text style={styles.quickStatusText}>
+                          {option.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                   {contextLines.length > 0 && (
                     <View style={styles.contextBlock}>
                       {contextLines.map((line, index) => (
@@ -330,7 +360,9 @@ export default function AgendaScreen() {
         ListEmptyComponent={() => (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>
-              {!hasHydratedConfig || agendaQuery.isPending || agendaQuery.isFetching
+              {!hasHydratedConfig ||
+              agendaQuery.isPending ||
+              agendaQuery.isFetching
                 ? "Loading agenda from your Org files..."
                 : "No agenda items. Add scheduled TODOs in your Org files."}
             </Text>
@@ -379,108 +411,132 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   section: {
-    paddingHorizontal: 12,
-    paddingVertical: 18,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 12,
     color: "#9BA394",
     textTransform: "uppercase",
-    marginBottom: 12,
+    marginBottom: 6,
     fontWeight: "800",
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
   },
   todayTitle: { color: "#E5EBDD" },
   missedTitle: { color: "#E8B7A8" },
   cardRow: {
-    marginBottom: 12,
+    marginBottom: 6,
     backgroundColor: "#091108",
-    borderRadius: 18,
-    borderWidth: 1.5,
+    borderRadius: 12,
+    borderWidth: 1,
     borderColor: "#3D4638",
-    padding: 16,
+    padding: 8,
   },
   cardHeaderRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 7,
-    marginBottom: 12,
+    gap: 4,
+    marginBottom: 4,
     alignItems: "center",
   },
   statusChip: {
     backgroundColor: "#394A23",
-    borderRadius: 11,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
   },
   statusChipText: {
     color: "#F1F5E8",
     fontWeight: "900",
-    fontSize: 12,
+    fontSize: 10,
   },
   kindChip: {
     color: "#DDE5D4",
     backgroundColor: "#1E271B",
-    borderRadius: 11,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    fontSize: 12,
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    fontSize: 10,
     overflow: "hidden",
     fontWeight: "800",
   },
   dateChip: {
     color: "#C9D1C0",
     backgroundColor: "#1E271B",
-    borderRadius: 11,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    fontSize: 12,
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    fontSize: 10,
     overflow: "hidden",
   },
   ageChip: {
     color: "#C9D1C0",
     backgroundColor: "#1E271B",
-    borderRadius: 11,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    fontSize: 12,
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    fontSize: 10,
     overflow: "hidden",
     fontWeight: "800",
   },
   overdueChip: {
     color: "#F0C0B0",
     backgroundColor: "#352019",
-    borderRadius: 11,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    fontSize: 12,
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    fontSize: 10,
     overflow: "hidden",
     fontWeight: "900",
   },
   repeaterChip: {
     color: "#CDE8B4",
     backgroundColor: "#24371B",
-    borderRadius: 11,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    fontSize: 12,
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    fontSize: 10,
     overflow: "hidden",
     fontWeight: "800",
   },
   cardTitle: {
     color: "#F2F5EC",
-    fontSize: 26,
-    lineHeight: 32,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: "800",
-    marginBottom: 8,
+    marginBottom: 5,
+  },
+  quickStatusRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 5,
+    marginBottom: 5,
+  },
+  quickStatusButton: {
+    backgroundColor: "#182116",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#33402F",
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  quickStatusButtonActive: {
+    backgroundColor: "#394A23",
+    borderColor: "#718049",
+  },
+  quickStatusText: {
+    color: "#DDE5D4",
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: "800",
   },
   contextBlock: {
-    gap: 5,
+    gap: 2,
   },
   cardMeta: {
     color: "#C6CDBF",
-    fontSize: 19,
-    lineHeight: 27,
+    fontSize: 11,
+    lineHeight: 14,
   },
   empty: {
     flex: 1,
@@ -490,8 +546,8 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     color: "#8C9486",
-    fontSize: 18,
-    lineHeight: 25,
+    fontSize: 13,
+    lineHeight: 17,
     textAlign: "center",
   },
   modalOverlay: {
