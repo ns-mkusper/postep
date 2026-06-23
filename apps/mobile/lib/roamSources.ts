@@ -37,10 +37,7 @@ export async function loadRoamGraphForConfig(
 
 function splitNativeConfig(config: OrgBridgeConfig): OrgBridgeConfig {
   const roots = dedupeSourceList(config.roots.filter((root) => !isSafUri(root)));
-  const rootIdentities = new Set(roots.map(normalizeSourceIdentity));
-  const roamRoots = dedupeSourceList(config.roamRoots?.filter((root) => !isSafUri(root)) ?? []).filter(
-    (root) => !rootIdentities.has(normalizeSourceIdentity(root)),
-  );
+  const roamRoots = dedupeSourceList(config.roamRoots?.filter((root) => !isSafUri(root)) ?? []);
   return {
     roots,
     ...(roamRoots.length > 0 ? { roamRoots } : {}),
