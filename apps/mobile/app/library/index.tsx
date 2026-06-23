@@ -92,6 +92,13 @@ type SourceToken = {
   kind: SourceTokenKind;
 };
 
+type RenderedInlineTokenKind = "plain" | "link" | "bold" | "italic" | "code";
+
+type RenderedInlineToken = {
+  text: string;
+  kind: RenderedInlineTokenKind;
+};
+
 type NoteMetadata = {
   todo?: string | null;
   priority?: string | null;
@@ -255,7 +262,6 @@ function GraphicalActionIcon({
 }
 
 const PREVIEW_LOAD_CONCURRENCY = 4;
-const PREVIEW_LOAD_LIMIT = 24;
 const PREVIEW_LOAD_TIMEOUT_MS = 5000;
 const ANDROID_STATUS_BAR_FALLBACK = 58;
 
@@ -321,6 +327,9 @@ async function loadPreviewOrSkip(
       PREVIEW_LOAD_TIMEOUT_MS,
       doc.name,
     );
+    if (!payload.raw.trim()) {
+      return null;
+    }
     return buildPreview(doc, payload);
   } catch (error) {
     console.warn("Postep preview load skipped", {
@@ -361,6 +370,32 @@ function splitOrgInlineSyntax(text: string): SourceToken[] {
       text: match[0],
       kind: match[1] ? "link" : match[2] === "=" || match[2] === "~" ? "code" : "plain",
     });
+    offset = pattern.lastIndex;
+  }
+  if (offset < text.length) {
+    tokens.push({ text: text.slice(offset), kind: "plain" });
+  }
+  return tokens.length > 0 ? tokens : [{ text, kind: "plain" }];
+}
+
+function splitRenderedInlineSyntax(text: string): RenderedInlineToken[] {
+  const tokens: RenderedInlineToken[] = [];
+  const pattern = /\[\[[^\]]+\]\[([^\]]*)\]\]|\[\[([^\]]+)\]\]|([*_~=])([^\s].*?[^\s]|[^\s])\3/g;
+  let offset = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    if (match.index > offset) {
+      tokens.push({ text: text.slice(offset, match.index), kind: "plain" });
+    }
+    if (match[1] || match[2]) {
+      tokens.push({ text: match[1] ?? match[2], kind: "link" });
+    } else {
+      const marker = match[3];
+      tokens.push({
+        text: match[4],
+        kind: marker === "*" ? "bold" : marker === "/" ? "italic" : "code",
+      });
+    }
     offset = pattern.lastIndex;
   }
   if (offset < text.length) {
@@ -594,20 +629,6 @@ function buildPreview(doc: DocumentRef, payload: DocumentPayload): NotePreview {
       metadata.scheduled?.slice(0, 10) ??
       metadata.deadline?.slice(0, 10) ??
       null,
-  };
-}
-
-function buildFallbackPreview(doc: DocumentRef): NotePreview {
-  return {
-    doc,
-    title: doc.name.replace(/\.org$/i, ""),
-    lines: [],
-    checkedCount: 0,
-    tags: [],
-    metadata: {
-      properties: [],
-    },
-    primaryDate: null,
   };
 }
 
@@ -970,7 +991,7 @@ export default function LibraryScreen() {
     enabled: Boolean(documentsQuery.data) && hasConfiguredRoots,
     queryFn: () =>
       measureAsyncInteraction("noteGrid", async () => {
-        const documents = (documentsQuery.data ?? []).slice(0, PREVIEW_LOAD_LIMIT);
+        const documents = documentsQuery.data ?? [];
         const previews = await mapConcurrent(
           documents,
           PREVIEW_LOAD_CONCURRENCY,
@@ -986,25 +1007,12 @@ export default function LibraryScreen() {
       }),
   });
 
-  const previewByPath = useMemo(
-    () =>
-      new Map(
-        (previewsQuery.data?.value ?? []).map((preview) => [
-          preview.doc.path,
-          preview,
-        ]),
-      ),
-    [previewsQuery.data?.value],
-  );
-
   const noteGrid = useMemo(
     () => ({
-      value: (documentsQuery.data ?? []).map(
-        (doc) => previewByPath.get(doc.path) ?? buildFallbackPreview(doc),
-      ),
+      value: previewsQuery.data?.value ?? [],
       metric: previewsQuery.data?.metric ?? { elapsedMs: 0 },
     }),
-    [documentsQuery.data, previewByPath, previewsQuery.data?.metric],
+    [previewsQuery.data?.metric, previewsQuery.data?.value],
   );
 
   const visibleNotes = useMemo(() => {
@@ -1453,7 +1461,11 @@ export default function LibraryScreen() {
     </View>
   );
 
-  const openNote = (path: string) => setSelectedPath(path);
+  const openNote = (path: string) => {
+    setIsEditingDocument(false);
+    setDocumentDraftRaw("");
+    setSelectedPath(path);
+  };
 
   const sourceTokenStyle = (
     kind: SourceTokenKind,
@@ -1483,13 +1495,25 @@ export default function LibraryScreen() {
     return { color: palette.text };
   };
 
-  const renderSourceTokens = (
-    text: string,
-    keyPrefix: string,
-    palette = { text: "#E6EADF", muted: "#9AA193" },
-  ) =>
-    splitOrgInlineSyntax(text).map((token, tokenIndex) => (
-      <Text key={`${keyPrefix}:${tokenIndex}`} style={sourceTokenStyle(token.kind, palette)}>
+  const renderedInlineStyle = (kind: RenderedInlineTokenKind) => {
+    if (kind === "link") {
+      return styles.previewInlineLink;
+    }
+    if (kind === "bold") {
+      return styles.previewInlineBold;
+    }
+    if (kind === "italic") {
+      return styles.previewInlineItalic;
+    }
+    if (kind === "code") {
+      return styles.previewInlineCode;
+    }
+    return null;
+  };
+
+  const renderRenderedInlineTokens = (text: string, keyPrefix: string) =>
+    splitRenderedInlineSyntax(text).map((token, tokenIndex) => (
+      <Text key={`${keyPrefix}:${tokenIndex}`} style={renderedInlineStyle(token.kind)}>
         {token.text}
       </Text>
     ));
@@ -1559,7 +1583,7 @@ export default function LibraryScreen() {
                 line.checked && styles.previewCheckedText,
               ]}
             >
-              {renderSourceTokens(line.text, `preview-list-${item.doc.name}-${index}`)}
+              {renderRenderedInlineTokens(line.text, `preview-list-${item.doc.name}-${index}`)}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1600,7 +1624,7 @@ export default function LibraryScreen() {
               line.kind === "heading" && styles.previewHeadingText,
             ]}
           >
-            {renderSourceTokens(line.text, `preview-${item.doc.name}-${index}`)}
+            {renderRenderedInlineTokens(line.text, `preview-${item.doc.name}-${index}`)}
           </Text>
         </View>
       </TouchableOpacity>
@@ -2681,6 +2705,14 @@ const styles = StyleSheet.create({
   previewText: { flex: 1, color: "#E6EADF", fontSize: 11, lineHeight: 14 },
   previewHeadingText: { fontWeight: "700", color: "#F1F5EB" },
   previewCheckedText: { color: "#858C7F", textDecorationLine: "line-through" },
+  previewInlineLink: { color: "#AFC0FF", fontWeight: "700" },
+  previewInlineBold: { fontWeight: "800" },
+  previewInlineItalic: { fontStyle: "italic" },
+  previewInlineCode: {
+    color: "#C5F0BA",
+    backgroundColor: "rgba(197, 240, 186, 0.12)",
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+  },
   checkedSummary: {
     color: "#9AA193",
     fontSize: 10,

@@ -56,6 +56,21 @@ describe("SAF-backed agenda sources", () => {
     );
   });
 
+  it("dedupes documents listed from both local org and roam SAF roots", async () => {
+    installDriveMock(makeDriveDocs(3));
+
+    const documents = await listDocumentsForConfig({
+      roots: [rootUri],
+      roamRoots: [rootUri],
+    });
+
+    assert.equal(documents.length, 3);
+    assert.deepEqual(
+      documents.map((doc) => doc.name),
+      ["drive-01.org", "drive-02.org", "drive-03.org"],
+    );
+  });
+
   it("loads a non-empty agenda from Google Drive content URIs inside the refresh goal", async () => {
     const { maxActiveReads } = installDriveMock(makeDriveDocs(48), {
       readDelayMs: 8,

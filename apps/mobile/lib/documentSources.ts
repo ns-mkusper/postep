@@ -11,6 +11,28 @@ import {
 
 const LISTING_TARGET_MS = 10000;
 
+function normalizeDocumentIdentity(doc: DocumentRef): string {
+  try {
+    return decodeURIComponent(doc.path);
+  } catch {
+    return doc.path;
+  }
+}
+
+function dedupeDocuments(documents: DocumentRef[]): DocumentRef[] {
+  const seen = new Set<string>();
+  const deduped: DocumentRef[] = [];
+  for (const doc of documents) {
+    const identity = normalizeDocumentIdentity(doc);
+    if (seen.has(identity)) {
+      continue;
+    }
+    seen.add(identity);
+    deduped.push(doc);
+  }
+  return deduped;
+}
+
 export function isSafUri(uri: string): boolean {
   return uri.startsWith("content://");
 }
@@ -97,7 +119,7 @@ export async function listDocumentsForConfig(
     }
   }
 
-  const sorted = documents.sort((left, right) => left.name.localeCompare(right.name));
+  const sorted = dedupeDocuments(documents).sort((left, right) => left.name.localeCompare(right.name));
   console.log("Postep document listing", {
     files: sorted.length,
     elapsedMs: Date.now() - startedAt,
