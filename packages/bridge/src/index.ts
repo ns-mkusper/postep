@@ -1382,7 +1382,7 @@ function parseHeading(line: string): null | {
   priority: string | null;
   tags: string[];
 } {
-  const match = line.match(/^(\*+)\s+(.*)$/);
+  const match = line.match(/^\s*(\*+)\s+(.*)$/);
   if (!match) {
     return null;
   }

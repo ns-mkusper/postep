@@ -333,7 +333,15 @@ async function loadPreviewOrSkip(
 }
 
 function cleanOrgText(text: string) {
-  return text
+  let normalized = text.trim();
+  const heading = normalized.match(/^\s*\*+\s+(.*)$/);
+  if (heading) {
+    normalized = heading[1]
+      .replace(/\s+:([^\s]+):$/g, "")
+      .replace(/^([A-Z][A-Z_-]*)\s+/, "")
+      .replace(/^\[#([A-Z0-9])\]\s+/, "");
+  }
+  return normalized
     .replace(/\[\[([^\]]+)\]\[([^\]]+)\]\]/g, "$2")
     .replace(/\[\[([^\]]+)\]\]/g, "$1")
     .replace(/\s+/g, " ")

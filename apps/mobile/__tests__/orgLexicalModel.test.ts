@@ -210,7 +210,7 @@ describe('org UI interaction model with 10 local org samples', () => {
 
   it('formats fallback org syntax as editor projection without raw markers', () => {
     const raw = `#+TITLE: Rich sample
-* TODO [#A] Morning *habit* :habit:daily:
+  * TODO [#A] Morning *habit* :habit:daily:
 Body with [[id:alpha][Alpha link]] and /italic/ text.
 - [ ] =coded= task`;
     const document = createOrgLexicalDocument([], raw, { outlineOnly: false, readerMode: false });

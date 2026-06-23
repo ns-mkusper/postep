@@ -433,7 +433,7 @@ function formatText(text: string, _readerMode: boolean): string {
 }
 
 function parseHeadingLine(line: string): { depth: number; todo: string | null; priority: string | null; title: string; tags: string[] } | null {
-  const match = line.match(/^(\*+)\s+(.*)$/);
+  const match = line.match(/^\s*(\*+)\s+(.*)$/);
   if (!match) {
     return null;
   }
