@@ -224,7 +224,7 @@ export function convertOrgToLexical(raw: string, options: ConversionOptions): Le
     if (paragraphBuffer.length === 0) {
       return;
     }
-    const text = formatText(paragraphBuffer.join(' '), options.readerMode);
+    const text = displayText(paragraphBuffer.join(' '));
     nodes.push(paragraphNode(text));
     paragraphBuffer = [];
   };
@@ -283,7 +283,7 @@ export function convertOrgToLexical(raw: string, options: ConversionOptions): Le
         sourceRaw: line,
         lineStart: lineIndex,
         lineEnd: lineIndex,
-        children: [{ text: formatText(parsedHeading.title, options.readerMode) }]
+        children: [{ text: displayText(parsedHeading.title) }]
       } as LexicalProjectionNode);
       continue;
     }
@@ -300,7 +300,7 @@ export function convertOrgToLexical(raw: string, options: ConversionOptions): Le
         sourceRaw: line,
         lineStart: lineIndex,
         lineEnd: lineIndex,
-        children: [{ text: formatText(listMatch[4], options.readerMode) }]
+        children: [{ text: displayText(listMatch[4]) }]
       } as LexicalProjectionNode);
       continue;
     }
@@ -316,7 +316,7 @@ export function convertOrgToLexical(raw: string, options: ConversionOptions): Le
   pushCode();
 
   if (nodes.length === 0) {
-    return [paragraphNode(formatText(raw, options.readerMode))];
+    return [paragraphNode(displayText(raw))];
   }
 
   return nodes;
@@ -333,7 +333,7 @@ function lexicalNodeToProjection(node: LexicalNode, options: ConversionOptions):
       todo: parsed?.todo ?? node.todo_keyword ?? null,
       priority: parsed?.priority ?? node.priority ?? null,
       tags: parsed?.tags.length ? parsed.tags : node.tags,
-      children: [{ text: formatText(parsed?.title ?? node.text, options.readerMode) }]
+      children: [{ text: displayText(parsed?.title ?? node.text) }]
     } as LexicalProjectionNode];
   }
   if (node.type === 'list_item') {
@@ -345,7 +345,7 @@ function lexicalNodeToProjection(node: LexicalNode, options: ConversionOptions):
         ordered: node.ordered,
         checked: node.checked ?? null,
         sourceRaw: node.raw,
-        children: [{ text: formatText(node.text, options.readerMode) }]
+        children: [{ text: displayText(node.text) }]
       } as LexicalProjectionNode
     ];
   }
@@ -378,7 +378,7 @@ function lexicalNodeToProjection(node: LexicalNode, options: ConversionOptions):
   if (node.type === 'horizontal_rule') {
     return [{ ...metadata, type: 'horizontal_rule', sourceRaw: node.raw, children: [{ text: '────' }] } as LexicalProjectionNode];
   }
-  return [{ ...metadata, type: 'paragraph', sourceRaw: node.raw, children: [{ text: formatText(node.text, options.readerMode) }] } as LexicalProjectionNode];
+  return [{ ...metadata, type: 'paragraph', sourceRaw: node.raw, children: [{ text: displayText(node.text) }] } as LexicalProjectionNode];
 }
 
 function paragraphNode(text: string): LexicalProjectionNode {
@@ -421,6 +421,10 @@ function getDisplayText(node: LexicalNode, options: ConversionOptions): string {
     return '────';
   }
   return formatText(node.text, options.readerMode);
+}
+
+function displayText(text: string): string {
+  return text.trim();
 }
 
 function formatText(text: string, _readerMode: boolean): string {

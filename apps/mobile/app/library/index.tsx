@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Modal,
@@ -929,6 +929,28 @@ export default function LibraryScreen() {
   const hasConfiguredRoots =
     bridgeConfig.roots.length > 0 || (bridgeConfig.roamRoots?.length ?? 0) > 0;
 
+  const closeNote = useCallback(() => {
+    setSelectedDocumentKey(null);
+    setSelectedDocumentLine(null);
+    setActiveDocumentDialog(null);
+    setIsEditingDocument(false);
+    setDocumentDraftRaw("");
+    setEditingBlockId(null);
+    setDraftRaw("");
+    setSelectedPath(null);
+  }, []);
+
+  const openNote = useCallback((path: string) => {
+    setSelectedDocumentKey(null);
+    setSelectedDocumentLine(null);
+    setActiveDocumentDialog(null);
+    setIsEditingDocument(false);
+    setDocumentDraftRaw("");
+    setEditingBlockId(null);
+    setDraftRaw("");
+    setSelectedPath(path);
+  }, []);
+
   const documentsQuery = useQuery({
     queryKey: [
       "documents",
@@ -952,7 +974,7 @@ export default function LibraryScreen() {
       documentsQuery.data.map((doc) => doc.path),
     );
     if (resolved) {
-      setSelectedPath(resolved);
+      openNote(resolved);
       setSearchQuery("");
     } else {
       console.warn("Postep open request did not match any document", {
@@ -960,7 +982,7 @@ export default function LibraryScreen() {
       });
     }
     router.setParams({ path: "" });
-  }, [params.path, documentsQuery.data]);
+  }, [params.path, documentsQuery.data, openNote]);
 
   useEffect(() => {
     if (documentsQuery.data && selectedPath) {
@@ -968,10 +990,10 @@ export default function LibraryScreen() {
         (doc) => doc.path === selectedPath,
       );
       if (!stillExists) {
-        setSelectedPath(null);
+        closeNote();
       }
     }
-  }, [documentsQuery.data, selectedPath]);
+  }, [closeNote, documentsQuery.data, selectedPath]);
 
   useEffect(() => {
     setSelectedDocumentKey(null);
@@ -1376,7 +1398,7 @@ export default function LibraryScreen() {
     <View style={styles.listEditorScreen}>
       <View style={styles.listEditorTopBar}>
         <TouchableOpacity
-          onPress={() => setSelectedPath(null)}
+          onPress={closeNote}
           style={styles.iconButton}
           testID="back-to-notes"
         >
@@ -1461,11 +1483,6 @@ export default function LibraryScreen() {
     </View>
   );
 
-  const openNote = (path: string) => {
-    setIsEditingDocument(false);
-    setDocumentDraftRaw("");
-    setSelectedPath(path);
-  };
 
   const sourceTokenStyle = (
     kind: SourceTokenKind,
@@ -2040,7 +2057,7 @@ export default function LibraryScreen() {
             onChangeText={(text) => {
               setSearchQuery(text);
               if (selectedPath) {
-                setSelectedPath(null);
+                closeNote();
               }
             }}
             returnKeyType="search"
@@ -2138,7 +2155,7 @@ export default function LibraryScreen() {
             testID="document-top-bar"
           >
             <TouchableOpacity
-              onPress={() => setSelectedPath(null)}
+              onPress={closeNote}
               style={styles.iconButton}
               testID="back-to-notes"
             >

@@ -208,7 +208,7 @@ describe('org UI interaction model with 10 local org samples', () => {
     assert.match(orgProjectionPlainText(document.projection[4]), /^\| Metric \| Budget \|/);
   });
 
-  it('formats fallback org syntax as editor projection without raw markers', () => {
+  it('preserves inline org syntax for rendered projection styling', () => {
     const raw = `#+TITLE: Rich sample
   * TODO [#A] Morning *habit* :habit:daily:
 Body with [[id:alpha][Alpha link]] and /italic/ text.
@@ -218,7 +218,7 @@ Body with [[id:alpha][Alpha link]] and /italic/ text.
     const heading = document.projection.find((node) => node.type === 'heading');
     assert.ok(heading);
     assert.equal(heading.type, 'heading');
-    assert.equal(heading.children[0].text, 'Morning habit');
+    assert.equal(heading.children[0].text, 'Morning *habit*');
     assert.equal(heading.todo, 'TODO');
     assert.equal(heading.priority, 'A');
     assert.deepEqual(heading.tags, ['habit', 'daily']);
@@ -228,17 +228,17 @@ Body with [[id:alpha][Alpha link]] and /italic/ text.
     const paragraph = document.projection.find((node) => node.type === 'paragraph' && node.children[0].text.includes('Alpha link'));
     assert.ok(paragraph);
     assert.equal(paragraph.type, 'paragraph');
-    assert.equal(paragraph.children[0].text, 'Body with Alpha link and italic text.');
+    assert.equal(paragraph.children[0].text, 'Body with [[id:alpha][Alpha link]] and /italic/ text.');
 
     const listItem = document.projection.find((node) => node.type === 'list_item');
     assert.ok(listItem);
     assert.equal(listItem.type, 'list_item');
-    assert.equal(listItem.children[0].text, 'coded task');
+    assert.equal(listItem.children[0].text, '=coded= task');
     assert.equal(listItem.lineStart, 3);
     assert.equal(listItem.lineEnd, 3);
   });
 
-  it('prefers raw heading syntax for metadata while rendering clean child text', () => {
+  it('prefers raw heading syntax for metadata while preserving inline render syntax', () => {
     const nodes: LexicalNode[] = [
       {
         type: 'heading',
@@ -269,14 +269,14 @@ Body with [[id:alpha][Alpha link]] and /italic/ text.
     assert.equal(heading.todo, 'NEXT');
     assert.equal(heading.priority, 'B');
     assert.deepEqual(heading.tags, ['tag']);
-    assert.equal(heading.children[0].text, 'Parsed title with link');
+    assert.equal(heading.children[0].text, 'Parsed title with [[id:x][link]]');
     assert.equal(heading.lineStart, 7);
     assert.equal(heading.lineEnd, 7);
     assert.equal(heading.sourceRaw, '* NEXT [#B] Parsed title with [[id:x][link]] :tag:');
 
     const paragraph = projection[1];
     assert.equal(paragraph.type, 'paragraph');
-    assert.equal(paragraph.children[0].text, 'See link and code');
+    assert.equal(paragraph.children[0].text, 'See [[id:x][link]] and ~code~');
     assert.equal(paragraph.lineStart, 8);
     assert.equal(paragraph.lineEnd, 8);
   });

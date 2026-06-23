@@ -11,12 +11,42 @@ import {
 
 const LISTING_TARGET_MS = 10000;
 
-function normalizeDocumentIdentity(doc: DocumentRef): string {
-  try {
-    return decodeURIComponent(doc.path);
-  } catch {
-    return doc.path;
+export function normalizeSourceIdentity(value: string): string {
+  let normalized = value.trim();
+  for (let idx = 0; idx < 2; idx += 1) {
+    try {
+      const decoded = decodeURIComponent(normalized);
+      if (decoded === normalized) {
+        break;
+      }
+      normalized = decoded;
+    } catch {
+      break;
+    }
   }
+  return normalized.replace(/\/+$/, "");
+}
+
+export function dedupeSourceList(sources: string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const source of sources) {
+    const trimmed = source.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const identity = normalizeSourceIdentity(trimmed);
+    if (seen.has(identity)) {
+      continue;
+    }
+    seen.add(identity);
+    deduped.push(trimmed);
+  }
+  return deduped;
+}
+
+function normalizeDocumentIdentity(doc: DocumentRef): string {
+  return normalizeSourceIdentity(doc.path);
 }
 
 function dedupeDocuments(documents: DocumentRef[]): DocumentRef[] {
@@ -64,10 +94,18 @@ function splitConfig(config: OrgBridgeConfig): {
   safRoots: string[];
   safRoamRoots: string[];
 } {
-  const nativeRoots = config.roots.filter((root) => !isSafUri(root));
-  const safRoots = config.roots.filter(isSafUri);
-  const nativeRoamRoots = config.roamRoots?.filter((root) => !isSafUri(root));
-  const safRoamRoots = config.roamRoots?.filter(isSafUri) ?? [];
+  const roots = dedupeSourceList(config.roots);
+  const roamRoots = dedupeSourceList(config.roamRoots ?? []);
+  const nativeRoots = roots.filter((root) => !isSafUri(root));
+  const safRoots = roots.filter(isSafUri);
+  const nativeRootIdentities = new Set(nativeRoots.map(normalizeSourceIdentity));
+  const safRootIdentities = new Set(safRoots.map(normalizeSourceIdentity));
+  const nativeRoamRoots = roamRoots.filter(
+    (root) => !isSafUri(root) && !nativeRootIdentities.has(normalizeSourceIdentity(root)),
+  );
+  const safRoamRoots = roamRoots.filter(
+    (root) => isSafUri(root) && !safRootIdentities.has(normalizeSourceIdentity(root)),
+  );
   return {
     nativeConfig: {
       roots: nativeRoots,
@@ -95,7 +133,7 @@ export async function listDocumentsForConfig(
     documents.push(...(await listDocumentsAsync(nativeConfig)));
   }
 
-  const safDocumentRoots = [...safRoots, ...safRoamRoots];
+  const safDocumentRoots = dedupeSourceList([...safRoots, ...safRoamRoots]);
   if (safDocumentRoots.length > 0) {
     const { listOrgFilesRecursively } =
       await import("@postep/bridge/platform/android/saf");
@@ -150,7 +188,7 @@ export async function updateDocumentForConfig(
   }
   return updateDocumentAsync({
     ...request,
-    roots: request.roots.filter((root) => !isSafUri(root)),
-    roamRoots: request.roamRoots?.filter((root) => !isSafUri(root)),
+    roots: dedupeSourceList(request.roots).filter((root) => !isSafUri(root)),
+    roamRoots: dedupeSourceList(request.roamRoots ?? []).filter((root) => !isSafUri(root)),
   });
 }

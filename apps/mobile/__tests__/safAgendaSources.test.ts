@@ -57,13 +57,14 @@ describe("SAF-backed agenda sources", () => {
   });
 
   it("dedupes documents listed from both local org and roam SAF roots", async () => {
-    installDriveMock(makeDriveDocs(3));
+    const { listCalls } = installDriveMock(makeDriveDocs(3));
 
     const documents = await listDocumentsForConfig({
       roots: [rootUri],
-      roamRoots: [rootUri],
+      roamRoots: [rootUri, rootUri],
     });
 
+    assert.equal(listCalls(), 1);
     assert.equal(documents.length, 3);
     assert.deepEqual(
       documents.map((doc) => doc.name),
@@ -218,10 +219,12 @@ function installDriveMock(
   docs: Map<string, string>;
   writes: Array<{ uri: string; contents: string }>;
   maxActiveReads: () => number;
+  listCalls: () => number;
 } {
   let activeReads = 0;
   let maxReads = 0;
   const writes: Array<{ uri: string; contents: string }> = [];
+  let listings = 0;
   globalThis.__postepContentUri = {
     async readAsString(uri: string) {
       activeReads += 1;
@@ -249,6 +252,7 @@ function installDriveMock(
       docs.set(uri, contents);
     },
     async listOrgFilesRecursively() {
+      listings += 1;
       return {
         entries: [
           ...[...docs.keys()].map((uri) => ({
@@ -273,6 +277,7 @@ function installDriveMock(
     docs,
     writes,
     maxActiveReads: () => maxReads,
+    listCalls: () => listings,
   };
 }
 
