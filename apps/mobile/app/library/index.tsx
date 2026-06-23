@@ -13,10 +13,12 @@ import {
   TextInput,
   Platform,
   StatusBar,
+  BackHandler,
   useWindowDimensions,
   useColorScheme,
   type GestureResponderEvent,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -30,7 +32,6 @@ import { LexicalDocument } from "../../components/LexicalDocument";
 import { useBridgeEvent } from "../../hooks/useBridgeEvent";
 import { useBridgeConfig } from "../../store/orgConfig";
 import {
-  createBlockViewModels,
   createOrgLexicalDocument,
   measureAsyncInteraction,
   measureInteraction,
@@ -45,6 +46,12 @@ import {
   resolveDocumentPath,
   updateDocumentForConfig,
 } from "../../lib/documentSources";
+import {
+  documentPreviewsQueryKey,
+  documentQueryKey,
+  documentsQueryKey,
+  hasConfiguredOrgRoots,
+} from "../../lib/queryKeys";
 import {
   archiveHeading,
   copyHeadingBlock,
@@ -91,6 +98,15 @@ type SourceToken = {
   text: string;
   kind: SourceTokenKind;
 };
+
+function isDoneLikeStatus(status?: string | null) {
+  const normalized = status?.toUpperCase();
+  return (
+    normalized === "DONE" ||
+    normalized === "CANCELLED" ||
+    normalized === "CANCELED"
+  );
+}
 
 type RenderedInlineTokenKind = "plain" | "link" | "bold" | "italic" | "code";
 
@@ -265,6 +281,25 @@ const PREVIEW_LOAD_CONCURRENCY = 4;
 const PREVIEW_LOAD_TIMEOUT_MS = 5000;
 const ANDROID_STATUS_BAR_FALLBACK = 58;
 
+function routePathParam(value?: string | string[]): string | null {
+  const param = Array.isArray(value) ? value[0] : value;
+  if (!param) {
+    return null;
+  }
+  if (
+    param.startsWith("content://") ||
+    param.startsWith("file://") ||
+    param.startsWith("/")
+  ) {
+    return param;
+  }
+  try {
+    return decodeURIComponent(param);
+  } catch {
+    return param;
+  }
+}
+
 function topSystemInset(insetTop: number): number {
   if (Platform.OS !== "android") {
     return insetTop;
@@ -436,7 +471,7 @@ function tokenizeOrgSourceLine(line: string): SourceToken[] {
   if (heading) {
     return [
       { text: heading[1], kind: "marker" },
-      ...(heading[2] ? [{ text: `${heading[2]} `, kind: heading[2] === "DONE" ? "done" : "todo" } as SourceToken] : []),
+      ...(heading[2] ? [{ text: `${heading[2]} `, kind: isDoneLikeStatus(heading[2]) ? "done" : "todo" } as SourceToken] : []),
       ...(heading[3] ? [{ text: `[#${heading[3]}] `, kind: "priority" } as SourceToken] : []),
       ...splitOrgInlineSyntax(heading[4] ?? ""),
       ...(heading[5] ? [{ text: heading[5], kind: "tag" } as SourceToken] : []),
@@ -675,11 +710,12 @@ function renderOrgNode(
   fallback: Parameters<typeof LexicalDocument>[0]["value"],
 ) {
   if (node.type === "heading") {
+    const doneHeading = isDoneLikeStatus(node.todo_keyword);
     return (
       <View style={styles.renderedHeading}>
         <View style={styles.metadataRow}>
           {node.todo_keyword && (
-            <Text style={styles.todoChip}>{node.todo_keyword}</Text>
+            <Text style={[styles.todoChip, doneHeading && styles.todoChipDone]}>{node.todo_keyword}</Text>
           )}
           {node.priority && (
             <Text style={styles.priorityChip}>Priority {node.priority}</Text>
@@ -697,6 +733,7 @@ function renderOrgNode(
           style={[
             styles.renderedHeadingText,
             node.depth > 1 && styles.renderedSubheadingText,
+            doneHeading && styles.renderedHeadingDoneText,
           ]}
         >
           {cleanOrgText(node.text)}
@@ -898,10 +935,14 @@ function documentEditTheme(dark: boolean): DocumentEditTheme {
 export default function LibraryScreen() {
   const queryClient = useQueryClient();
   const bridgeConfig = useBridgeConfig();
-  const params = useLocalSearchParams<{ path?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    path?: string | string[];
+    encodedPath?: string | string[];
+  }>();
   const insets = useSafeAreaInsets();
   const headerPaddingTop = topSystemInset(insets.top) + 8;
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedPathFromRoute, setSelectedPathFromRoute] = useState(false);
   const [readerMode, setReaderMode] = useState(false);
   const [outlineOnly, setOutlineOnly] = useState(false);
   const [showDocument, setShowDocument] = useState(true);
@@ -926,8 +967,7 @@ export default function LibraryScreen() {
   const editTheme = documentEditTheme(isDarkMode);
   const { width } = useWindowDimensions();
   const numColumns = width >= 360 ? 2 : 1;
-  const hasConfiguredRoots =
-    bridgeConfig.roots.length > 0 || (bridgeConfig.roamRoots?.length ?? 0) > 0;
+  const hasConfiguredRoots = hasConfiguredOrgRoots(bridgeConfig);
 
   const closeNote = useCallback(() => {
     setSelectedDocumentKey(null);
@@ -938,26 +978,28 @@ export default function LibraryScreen() {
     setEditingBlockId(null);
     setDraftRaw("");
     setSelectedPath(null);
+    setSelectedPathFromRoute(false);
   }, []);
 
-  const openNote = useCallback((path: string) => {
-    setSelectedDocumentKey(null);
-    setSelectedDocumentLine(null);
-    setActiveDocumentDialog(null);
-    setIsEditingDocument(false);
-    setDocumentDraftRaw("");
-    setEditingBlockId(null);
-    setDraftRaw("");
-    setSelectedPath(path);
-  }, []);
+  const openNote = useCallback(
+    (path: string, options?: { fromRoute?: boolean }) => {
+      setSelectedDocumentKey(null);
+      setSelectedDocumentLine(null);
+      setActiveDocumentDialog(null);
+      setIsEditingDocument(false);
+      setDocumentDraftRaw("");
+      setEditingBlockId(null);
+      setDraftRaw("");
+      setSelectedPath(path);
+      setSelectedPathFromRoute(Boolean(options?.fromRoute));
+    },
+    [],
+  );
 
   const documentsQuery = useQuery({
-    queryKey: [
-      "documents",
-      bridgeConfig.roots.join(":"),
-      bridgeConfig.roamRoots?.join(":") ?? "",
-    ],
+    queryKey: documentsQueryKey(bridgeConfig),
     queryFn: () => listDocumentsForConfig(bridgeConfig),
+    enabled: hasConfiguredRoots,
   });
 
   // Open requests arrive as a route param (e.g. from the roam screen). Apply
@@ -965,31 +1007,36 @@ export default function LibraryScreen() {
   // not-found cleanup effect below in an endless setState loop, and would
   // re-open the note every time the user navigates back to the grid.
   useEffect(() => {
-    const pathParam = Array.isArray(params.path) ? params.path[0] : params.path;
-    if (!pathParam || !documentsQuery.data) {
+    const requestedPath =
+      routePathParam(params.encodedPath) ?? routePathParam(params.path);
+    if (!requestedPath) {
       return;
     }
-    const resolved = resolveDocumentPath(
-      pathParam,
-      documentsQuery.data.map((doc) => doc.path),
-    );
+    const listedPaths = documentsQuery.data?.map((doc) => doc.path) ?? [];
+    const resolved =
+      listedPaths.length > 0
+        ? resolveDocumentPath(requestedPath, listedPaths)
+        : requestedPath;
     if (resolved) {
-      openNote(resolved);
+      openNote(resolved, { fromRoute: true });
       setSearchQuery("");
     } else {
       console.warn("Postep open request did not match any document", {
-        path: pathParam,
+        path: requestedPath,
       });
     }
-    router.setParams({ path: "" });
-  }, [params.path, documentsQuery.data, openNote]);
+    router.setParams({ path: "", encodedPath: "" });
+  }, [params.encodedPath, params.path, documentsQuery.data, openNote]);
 
   useEffect(() => {
     if (documentsQuery.data && selectedPath) {
-      const stillExists = documentsQuery.data.some(
-        (doc) => doc.path === selectedPath,
-      );
-      if (!stillExists) {
+      const listedPaths = documentsQuery.data.map((doc) => doc.path);
+      const resolved = resolveDocumentPath(selectedPath, listedPaths);
+      if (resolved && resolved !== selectedPath) {
+        setSelectedPath(resolved);
+        return;
+      }
+      if (!resolved) {
         closeNote();
       }
     }
@@ -1004,13 +1051,11 @@ export default function LibraryScreen() {
   }, [selectedPath]);
 
   const previewsQuery = useQuery({
-    queryKey: [
-      "document-previews",
-      documentsQuery.data?.map((doc) => doc.path).join(":"),
-      bridgeConfig.roots.join(":"),
-      bridgeConfig.roamRoots?.join(":") ?? "",
-    ],
-    enabled: Boolean(documentsQuery.data) && hasConfiguredRoots,
+    queryKey: documentPreviewsQueryKey(
+      bridgeConfig,
+      documentsQuery.data?.map((doc) => doc.path),
+    ),
+    enabled: !selectedPath && Boolean(documentsQuery.data) && hasConfiguredRoots,
     queryFn: () =>
       measureAsyncInteraction("noteGrid", async () => {
         const documents = documentsQuery.data ?? [];
@@ -1029,12 +1074,26 @@ export default function LibraryScreen() {
       }),
   });
 
+  const fallbackNotePreviews = useMemo<NotePreview[]>(
+    () =>
+      (documentsQuery.data ?? []).map((doc) => ({
+        doc,
+        title: doc.name.replace(/\.org$/i, ""),
+        lines: [],
+        checkedCount: 0,
+        tags: [],
+        metadata: { properties: [] },
+        primaryDate: null,
+      })),
+    [documentsQuery.data],
+  );
+
   const noteGrid = useMemo(
     () => ({
-      value: previewsQuery.data?.value ?? [],
+      value: previewsQuery.data?.value ?? fallbackNotePreviews,
       metric: previewsQuery.data?.metric ?? { elapsedMs: 0 },
     }),
-    [previewsQuery.data?.metric, previewsQuery.data?.value],
+    [fallbackNotePreviews, previewsQuery.data?.metric, previewsQuery.data?.value],
   );
 
   const visibleNotes = useMemo(() => {
@@ -1056,12 +1115,7 @@ export default function LibraryScreen() {
   }, [noteGrid.value, searchQuery]);
 
   const documentQuery = useQuery({
-    queryKey: [
-      "document",
-      selectedPath,
-      bridgeConfig.roots.join(":"),
-      bridgeConfig.roamRoots?.join(":") ?? "",
-    ],
+    queryKey: documentQueryKey(bridgeConfig, selectedPath ?? ""),
     enabled: Boolean(selectedPath) && hasConfiguredRoots,
     queryFn: () => loadDocumentForConfig(bridgeConfig, selectedPath!),
   });
@@ -1072,25 +1126,6 @@ export default function LibraryScreen() {
     }
   }, [documentQuery.data?.raw, isEditingDocument]);
 
-  const blockModel = useMemo(
-    () =>
-      measureInteraction("lexicalProjection", () =>
-        createBlockViewModels(
-          documentQuery.data?.lexical ?? [],
-          documentQuery.data?.raw ?? "",
-          {
-            outlineOnly,
-            readerMode,
-          },
-        ),
-      ),
-    [
-      documentQuery.data?.raw,
-      documentQuery.data?.lexical,
-      outlineOnly,
-      readerMode,
-    ],
-  );
   const lexicalDocument = useMemo(
     () =>
       measureInteraction("lexicalProjection", () =>
@@ -1110,7 +1145,6 @@ export default function LibraryScreen() {
       readerMode,
     ],
   );
-  const blocks = blockModel.value;
   const selectedName =
     documentsQuery.data?.find((doc) => doc.path === selectedPath)?.name ??
     "Org note";
@@ -1165,15 +1199,7 @@ export default function LibraryScreen() {
           raw,
         }),
     );
-    queryClient.setQueryData(
-      [
-        "document",
-        path,
-        bridgeConfig.roots.join(":"),
-        bridgeConfig.roamRoots?.join(":") ?? "",
-      ],
-      payload,
-    );
+    queryClient.setQueryData(documentQueryKey(bridgeConfig, path), payload);
     queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] === "agenda",
     });
@@ -1305,6 +1331,45 @@ export default function LibraryScreen() {
     router.push(href);
   };
 
+  const closeNoteOrReturnToSource = useCallback(() => {
+    const shouldReturnToSource = selectedPathFromRoute && router.canGoBack();
+    closeNote();
+    if (shouldReturnToSource) {
+      router.back();
+    }
+  }, [closeNote, selectedPathFromRoute]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+        if (isAppMenuOpen) {
+          closeAppMenu();
+          return true;
+        }
+        if (activeDocumentDialog !== null) {
+          setActiveDocumentDialog(null);
+          return true;
+        }
+        if (isEditingDocument) {
+          cancelDocumentEdit();
+          return true;
+        }
+        if (selectedPath) {
+          closeNoteOrReturnToSource();
+          return true;
+        }
+        return false;
+      });
+      return () => subscription.remove();
+    }, [
+      activeDocumentDialog,
+      closeNoteOrReturnToSource,
+      isAppMenuOpen,
+      isEditingDocument,
+      selectedPath,
+    ]),
+  );
+
   const toggleChecklistItem = async (path: string, lineStart?: number) => {
     if (lineStart === undefined || !hasConfiguredRoots) {
       return;
@@ -1324,15 +1389,7 @@ export default function LibraryScreen() {
           raw: nextRaw,
         }),
     );
-    queryClient.setQueryData(
-      [
-        "document",
-        path,
-        bridgeConfig.roots.join(":"),
-        bridgeConfig.roamRoots?.join(":") ?? "",
-      ],
-      nextPayload,
-    );
+    queryClient.setQueryData(documentQueryKey(bridgeConfig, path), nextPayload);
     queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] === "documents",
     });
@@ -1398,7 +1455,7 @@ export default function LibraryScreen() {
     <View style={styles.listEditorScreen}>
       <View style={styles.listEditorTopBar}>
         <TouchableOpacity
-          onPress={closeNote}
+          onPress={closeNoteOrReturnToSource}
           style={styles.iconButton}
           testID="back-to-notes"
         >
@@ -1607,6 +1664,7 @@ export default function LibraryScreen() {
       );
     }
 
+    const lineDone = line.kind === "heading" && isDoneLikeStatus(line.todo);
     return (
       <TouchableOpacity
         key={`${line.text}:${index}`}
@@ -1627,7 +1685,7 @@ export default function LibraryScreen() {
         <View style={styles.previewTextButton} testID={`note-rendered-preview-${item.doc.name}-${index}`}>
           {line.kind === "heading" && (line.todo || line.priority || (line.tags?.length ?? 0) > 0) ? (
             <View style={styles.previewMetadataInline}>
-              {line.todo ? <Text style={styles.todoChip}>{line.todo}</Text> : null}
+              {line.todo ? <Text style={[styles.todoChip, lineDone && styles.todoChipDone]}>{line.todo}</Text> : null}
               {line.priority ? <Text style={styles.priorityChip}>#{line.priority}</Text> : null}
               {line.tags?.slice(0, 2).map((tag) => (
                 <Text key={tag} style={styles.tagChip}>#{tag}</Text>
@@ -1639,6 +1697,7 @@ export default function LibraryScreen() {
             style={[
               styles.previewText,
               line.kind === "heading" && styles.previewHeadingText,
+              lineDone && styles.previewHeadingDoneText,
             ]}
           >
             {renderRenderedInlineTokens(line.text, `preview-${item.doc.name}-${index}`)}
@@ -1648,56 +1707,68 @@ export default function LibraryScreen() {
     );
   };
 
-  const renderNoteCard = ({ item }: { item: NotePreview }) => (
-    <View style={styles.noteCard} testID={`document-card-${item.doc.name}`}>
-      <TouchableOpacity
-        onPress={() => openNote(item.doc.path)}
-        activeOpacity={0.78}
+  const renderNoteCard = ({ item }: { item: NotePreview }) => {
+    const noteDone = isDoneLikeStatus(item.metadata.todo);
+    return (
+      <View
+        style={[styles.noteCard, noteDone && styles.noteCardDone]}
+        testID={`document-card-${item.doc.name}`}
       >
-        <Text style={styles.noteTitle}>{item.title}</Text>
-        <View style={styles.metadataRow}>
-          {item.metadata.todo && (
-            <Text style={styles.todoChip}>{item.metadata.todo}</Text>
-          )}
-          {item.metadata.priority && (
-            <Text style={styles.priorityChip}>#{item.metadata.priority}</Text>
-          )}
-          {item.metadata.habit && <Text style={styles.habitChip}>Habit</Text>}
-          {item.metadata.scheduled && (
-            <Text style={styles.metaChip}>
-              Scheduled {item.metadata.scheduled}
-            </Text>
-          )}
-          {item.metadata.deadline && !item.metadata.scheduled && (
-            <Text style={styles.deadlineChip}>
-              Due {item.metadata.deadline}
-            </Text>
-          )}
-        </View>
-      </TouchableOpacity>
-      <View style={styles.previewLines}>
-        {item.lines.map((line, index) => renderPreviewLine(item, line, index))}
-      </View>
-      {item.checkedCount > 0 && (
-        <Text style={styles.checkedSummary}>
-          + {item.checkedCount} checked items
-        </Text>
-      )}
-      {item.tags.length > 0 && (
         <TouchableOpacity
-          style={styles.tagRow}
           onPress={() => openNote(item.doc.path)}
           activeOpacity={0.78}
         >
-          {item.tags.map((tag) => (
-            <Text key={tag} style={styles.tagChip}>
-              #{tag}
-            </Text>
-          ))}
+          <Text style={[styles.noteTitle, noteDone && styles.noteTitleDone]}>
+            {item.title}
+          </Text>
+          <View style={styles.metadataRow}>
+            {item.metadata.todo && (
+              <Text style={[styles.todoChip, noteDone && styles.todoChipDone]}>
+                {item.metadata.todo}
+              </Text>
+            )}
+            {item.metadata.priority && (
+              <Text style={styles.priorityChip}>#{item.metadata.priority}</Text>
+            )}
+            {item.metadata.habit && (
+              <Text style={styles.habitChip}>Habit</Text>
+            )}
+            {item.metadata.scheduled && (
+              <Text style={styles.metaChip}>
+                Scheduled {item.metadata.scheduled}
+              </Text>
+            )}
+            {item.metadata.deadline && !item.metadata.scheduled && (
+              <Text style={styles.deadlineChip}>
+                Due {item.metadata.deadline}
+              </Text>
+            )}
+          </View>
         </TouchableOpacity>
-      )}
-    </View>
-  );
+        <View style={styles.previewLines}>
+          {item.lines.map((line, index) => renderPreviewLine(item, line, index))}
+        </View>
+        {item.checkedCount > 0 && (
+          <Text style={styles.checkedSummary}>
+            + {item.checkedCount} checked items
+          </Text>
+        )}
+        {item.tags.length > 0 && (
+          <TouchableOpacity
+            style={styles.tagRow}
+            onPress={() => openNote(item.doc.path)}
+            activeOpacity={0.78}
+          >
+            {item.tags.map((tag) => (
+              <Text key={tag} style={styles.tagChip}>
+                #{tag}
+              </Text>
+            ))}
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
 
   const closeDocumentDialog = () => setActiveDocumentDialog(null);
 
@@ -2109,11 +2180,12 @@ export default function LibraryScreen() {
               numColumns > 1 ? styles.columnWrapper : undefined
             }
             contentContainerStyle={styles.noteGrid}
-            refreshing={documentsQuery.isFetching || previewsQuery.isFetching}
+            refreshing={documentsQuery.isRefetching || previewsQuery.isRefetching}
             onRefresh={onRefreshDocuments}
             ListHeaderComponent={() =>
               hasConfiguredRoots &&
-              (documentsQuery.isFetching || previewsQuery.isFetching) ? (
+              visibleNotes.length === 0 &&
+              (documentsQuery.isPending || previewsQuery.isPending) ? (
                 <View style={styles.loadingSourceBanner}>
                   <ActivityIndicator color="#AFC0FF" />
                   <Text style={styles.loadingSourceText}>Loading notes…</Text>
@@ -2123,7 +2195,8 @@ export default function LibraryScreen() {
             ListEmptyComponent={() => (
               <View style={styles.emptyDocs}>
                 {hasConfiguredRoots &&
-                (documentsQuery.isFetching || previewsQuery.isFetching) ? null : (
+                visibleNotes.length === 0 &&
+                (documentsQuery.isPending || previewsQuery.isPending) ? null : (
                   <Text style={styles.emptyDocsText}>
                     {searchQuery.trim()
                       ? "No notes match that search."
@@ -2155,7 +2228,7 @@ export default function LibraryScreen() {
             testID="document-top-bar"
           >
             <TouchableOpacity
-              onPress={closeNote}
+              onPress={closeNoteOrReturnToSource}
               style={styles.iconButton}
               testID="back-to-notes"
             >
@@ -2276,6 +2349,7 @@ export default function LibraryScreen() {
               ) : (
                 <LexicalDocument
                   value={lexicalDocument.value.projection}
+                  readerMode={readerMode}
                   selectedKey={selectedDocumentKey}
                   onSelectNode={selectDocumentNode}
                 />
@@ -2636,6 +2710,16 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginBottom: 5,
   },
+  noteCardDone: {
+    borderColor: "#2A3328",
+    backgroundColor: "#0A0F08",
+    opacity: 0.84,
+  },
+  noteTitleDone: {
+    color: "#8F978A",
+    textDecorationLine: "line-through",
+    textDecorationColor: "#8F978A",
+  },
   metadataRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -2652,6 +2736,11 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: "900",
     overflow: "hidden",
+  },
+  todoChipDone: {
+    color: "#AAB3A4",
+    backgroundColor: "#2D3529",
+    textDecorationLine: "line-through",
   },
   priorityChip: {
     color: "#F8D98A",
@@ -2721,6 +2810,10 @@ const styles = StyleSheet.create({
   checkboxChecked: { backgroundColor: "#8E987E", borderColor: "#8E987E" },
   previewText: { flex: 1, color: "#E6EADF", fontSize: 11, lineHeight: 14 },
   previewHeadingText: { fontWeight: "700", color: "#F1F5EB" },
+  previewHeadingDoneText: {
+    color: "#858C7F",
+    textDecorationLine: "line-through",
+  },
   previewCheckedText: { color: "#858C7F", textDecorationLine: "line-through" },
   previewInlineLink: { color: "#AFC0FF", fontWeight: "700" },
   previewInlineBold: { fontWeight: "800" },
@@ -3327,6 +3420,7 @@ const styles = StyleSheet.create({
   sourceTokenDone: {
     color: "#8B9287",
     fontWeight: "800",
+    textDecorationLine: "line-through",
   },
   sourceTokenPriority: {
     color: "#F6C86A",
@@ -3392,6 +3486,11 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   renderedSubheadingText: { fontSize: 24, lineHeight: 31 },
+  renderedHeadingDoneText: {
+    color: "#8F978A",
+    textDecorationLine: "line-through",
+    textDecorationColor: "#8F978A",
+  },
   metadataCard: {
     backgroundColor: "#111A10",
     borderRadius: 14,

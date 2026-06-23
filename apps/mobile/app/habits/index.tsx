@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
 } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { router } from "expo-router";
 
 import { addHabitAsync, type AgendaItem, type Habit } from "@postep/bridge";
 import { useBridgeConfig, useOrgConfig } from "../../store/orgConfig";
@@ -18,9 +19,31 @@ import {
   deleteHabitForConfig,
   loadAgendaSnapshotForConfig,
 } from "../../lib/agendaSources";
+import { agendaQueryKey, hasConfiguredOrgRoots } from "../../lib/queryKeys";
 
 function bareHabitTitle(title: string) {
   return title.replace(/^[A-Z][A-Z_-]*\s+/, "").trim();
+}
+
+function localDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function habitKey(habit: Habit) {
+  return `${habit.path ?? habit.title}:${habit.headline_line ?? bareHabitTitle(habit.title)}`;
+}
+
+function openNotePath(path?: string | null) {
+  if (!path) {
+    return;
+  }
+  router.push({
+    pathname: "/library",
+    params: { encodedPath: encodeURIComponent(path) },
+  });
 }
 
 function agendaItemForHabit(habit: Habit, items: AgendaItem[]) {
@@ -43,18 +66,16 @@ export default function HabitsScreen() {
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("New habit");
   const [scheduled, setScheduled] = useState("2026-05-15 Fri 08:00");
-  const agendaKey = [
-    "agenda",
-    config.roots.join(":"),
-    config.roamRoots?.join(":") ?? "",
-  ];
+  const [pendingHabitKey, setPendingHabitKey] = useState<string | null>(null);
+  const hasConfiguredRoots = hasConfiguredOrgRoots(config);
+  const agendaKey = agendaQueryKey(config);
 
   const agendaQuery = useQuery({
     queryKey: agendaKey,
     queryFn: () =>
-      config.roots.length === 0 && (config.roamRoots?.length ?? 0) === 0
-        ? Promise.resolve({ items: [], habits: [] })
-        : loadAgendaSnapshotForConfig(config),
+      hasConfiguredRoots
+        ? loadAgendaSnapshotForConfig(config)
+        : Promise.resolve({ items: [], habits: [] }),
     enabled: hasHydratedConfig,
   });
 
@@ -68,7 +89,7 @@ export default function HabitsScreen() {
 
   const handleAddHabit = async () => {
     if (
-      (config.roots.length === 0 && (config.roamRoots?.length ?? 0) === 0) ||
+      !hasConfiguredRoots ||
       !title.trim()
     ) {
       return;
@@ -84,29 +105,41 @@ export default function HabitsScreen() {
   };
 
   const handleCompleteHabit = async (habit: Habit) => {
+    const key = `done:${habitKey(habit)}`;
     const item = agendaItemForHabit(habit, agendaQuery.data?.items ?? []);
     if (!item) {
       console.warn("Habit is missing source metadata", habit.title);
       return;
     }
-    const snapshot = await completeHabitForConfig(
-      config,
-      item,
-      agendaQuery.data,
-    );
-    queryClient.setQueryData(agendaKey, snapshot);
+    setPendingHabitKey(key);
+    try {
+      const snapshot = await completeHabitForConfig(
+        config,
+        item,
+        agendaQuery.data,
+      );
+      queryClient.setQueryData(agendaKey, snapshot);
+    } finally {
+      setPendingHabitKey(null);
+    }
   };
 
   const handleDeleteHabit = async (habit: Habit) => {
-    if (config.roots.length === 0 && (config.roamRoots?.length ?? 0) === 0) {
+    if (!hasConfiguredRoots) {
       return;
     }
-    const snapshot = await deleteHabitForConfig(
-      config,
-      habit,
-      agendaQuery.data,
-    );
-    queryClient.setQueryData(agendaKey, snapshot);
+    const key = `delete:${habitKey(habit)}`;
+    setPendingHabitKey(key);
+    try {
+      const snapshot = await deleteHabitForConfig(
+        config,
+        habit,
+        agendaQuery.data,
+      );
+      queryClient.setQueryData(agendaKey, snapshot);
+    } finally {
+      setPendingHabitKey(null);
+    }
   };
 
   return (
@@ -155,47 +188,91 @@ export default function HabitsScreen() {
           `${item.path ?? item.title}:${item.headline_line ?? index}`
         }
         contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => (
-          <View style={styles.card} testID="habit-card">
-            <View style={styles.cardHeader}>
-              <Text style={styles.title}>{item.title}</Text>
-              <Text style={styles.streak}>{item.last_repeat ?? "—"}</Text>
+        renderItem={({ item }) => {
+          const today = localDateString();
+          const doneToday = item.last_repeat === today;
+          const key = habitKey(item);
+          const completing = pendingHabitKey === `done:${key}`;
+          const deleting = pendingHabitKey === `delete:${key}`;
+          const pending = completing || deleting;
+          return (
+            <View
+              style={[styles.card, doneToday && styles.cardDoneToday]}
+              testID="habit-card"
+            >
+              <View style={styles.cardHeader}>
+                <TouchableOpacity
+                  style={styles.titleButton}
+                  activeOpacity={0.75}
+                  onPress={() => openNotePath(item.path)}
+                  disabled={!item.path}
+                  testID={`habit-open-note-${item.title.replace(/\s+/g, "-").toLowerCase()}`}
+                >
+                  <Text style={[styles.title, doneToday && styles.titleDone]}>
+                    {item.title}
+                  </Text>
+                </TouchableOpacity>
+                <Text style={[styles.streak, doneToday && styles.streakDone]}>
+                  {doneToday ? "Done today" : item.last_repeat ?? "—"}
+                </Text>
+              </View>
+              {item.scheduled && (
+                <Text style={[styles.meta, doneToday && styles.metaDone]}>
+                  Scheduled {item.scheduled}
+                </Text>
+              )}
+              {item.description ? (
+                <Text
+                  style={[
+                    styles.description,
+                    doneToday && styles.descriptionDone,
+                  ]}
+                >
+                  {item.description}
+                </Text>
+              ) : null}
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  testID={`habit-done-${item.title.replace(/\s+/g, "-").toLowerCase()}`}
+                  style={[
+                    styles.doneButton,
+                    doneToday && styles.doneButtonComplete,
+                    pending && styles.actionButtonDisabled,
+                  ]}
+                  onPress={() => handleCompleteHabit(item)}
+                  disabled={doneToday || pending}
+                >
+                  {completing ? (
+                    <ActivityIndicator size="small" color="#F1F5E8" />
+                  ) : (
+                    <Text style={styles.doneText}>
+                      {doneToday ? "Done" : "Done today"}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  testID={`habit-delete-${item.title.replace(/\s+/g, "-").toLowerCase()}`}
+                  style={[styles.deleteButton, pending && styles.actionButtonDisabled]}
+                  onPress={() => handleDeleteHabit(item)}
+                  disabled={pending}
+                >
+                  {deleting ? (
+                    <ActivityIndicator size="small" color="#F0C0B0" />
+                  ) : (
+                    <Text style={styles.deleteText}>Delete</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-            {item.scheduled && (
-              <Text style={styles.meta}>Scheduled {item.scheduled}</Text>
-            )}
-            {item.description ? (
-              <Text style={styles.description}>{item.description}</Text>
-            ) : null}
-            <View style={styles.actionRow}>
-              <TouchableOpacity
-                testID={`habit-done-${item.title.replace(/\s+/g, "-").toLowerCase()}`}
-                style={styles.doneButton}
-                onPress={() => handleCompleteHabit(item)}
-              >
-                <Text style={styles.doneText}>Done today</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                testID={`habit-delete-${item.title.replace(/\s+/g, "-").toLowerCase()}`}
-                style={styles.deleteButton}
-                onPress={() => handleDeleteHabit(item)}
-              >
-                <Text style={styles.deleteText}>Delete</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
+          );
+        }}
         ListEmptyComponent={() => (
           <View style={styles.empty}>
-            {!hasHydratedConfig ||
-            agendaQuery.isPending ||
-            agendaQuery.isFetching ? (
+            {!hasHydratedConfig || agendaQuery.isPending ? (
               <ActivityIndicator color="#DDE5D4" />
             ) : null}
             <Text style={styles.emptyText}>
-              {!hasHydratedConfig ||
-              agendaQuery.isPending ||
-              agendaQuery.isFetching
+              {!hasHydratedConfig || agendaQuery.isPending
                 ? "Loading habits from your Org files..."
                 : "Habits will appear after parsing org-habit entries."}
             </Text>
@@ -288,22 +365,38 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#3D4638",
   },
+  cardDoneToday: {
+    borderColor: "#4D5B3B",
+    backgroundColor: "#0A0F08",
+    opacity: 0.86,
+  },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     gap: 8,
+  },
+  titleButton: {
+    flex: 1,
   },
   title: {
     color: "#F2F5EC",
     fontSize: 14,
     lineHeight: 18,
     fontWeight: "800",
-    flex: 1,
+  },
+  titleDone: {
+    color: "#8F978A",
+    textDecorationLine: "line-through",
+    textDecorationColor: "#8F978A",
   },
   streak: {
     color: "#9BA394",
     fontSize: 11,
     lineHeight: 15,
+  },
+  streakDone: {
+    color: "#DCE8B8",
+    fontWeight: "800",
   },
   meta: {
     color: "#9BA394",
@@ -311,11 +404,17 @@ const styles = StyleSheet.create({
     lineHeight: 13,
     marginTop: 2,
   },
+  metaDone: {
+    color: "#7F877A",
+  },
   description: {
     marginTop: 4,
     color: "#C6CDBF",
     fontSize: 11,
     lineHeight: 14,
+  },
+  descriptionDone: {
+    color: "#828A7D",
   },
   actionRow: {
     flexDirection: "row",
@@ -328,6 +427,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 5,
+    minHeight: 28,
+    justifyContent: "center",
+  },
+  doneButtonComplete: {
+    backgroundColor: "#54652D",
+  },
+  actionButtonDisabled: {
+    opacity: 0.65,
   },
   doneText: {
     color: "#F1F5E8",
@@ -339,6 +446,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 5,
+    minHeight: 28,
+    justifyContent: "center",
   },
   deleteText: {
     color: "#F0C0B0",

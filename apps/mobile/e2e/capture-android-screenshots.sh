@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "${APP_SOURCE_DIR:-${SCRIPT_DIR}/..}"
 
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-e2e-artifacts/android-screenshots}"
 APP_ID="${APP_ID:-com.postep.mobile}"
@@ -21,6 +22,8 @@ ANDROID_BUDGET_WIDGET_ACTION_MS="${ANDROID_BUDGET_WIDGET_ACTION_MS:-20000}"
 ANDROID_BUDGET_FOLD_TOGGLE_MS="${ANDROID_BUDGET_FOLD_TOGGLE_MS:-20000}"
 ANDROID_BUDGET_SCROLL_MS="${ANDROID_BUDGET_SCROLL_MS:-4000}"
 ANDROID_BUDGET_LAUNCH_BUNDLE_MS="${ANDROID_BUDGET_LAUNCH_BUNDLE_MS:-120000}"
+ANDROID_WAIT_POLL_SECONDS="${ANDROID_WAIT_POLL_SECONDS:-0.5}"
+ANDROID_SCREENSHOT_SETTLE_SECONDS="${ANDROID_SCREENSHOT_SETTLE_SECONDS:-2}"
 mkdir -p "$SCREENSHOT_DIR" "$METRICS_DIR"
 rm -f "$SCREENSHOT_DIR"/*.png "$METRICS_JSON"
 declare -a METRIC_NAMES=()
@@ -180,34 +183,39 @@ is_launcher_xml() {
   grep -Eiq 'package="com\.android\.launcher3"|Pixel Launcher|Launcher3|nexuslauncher'
 }
 
+dismiss_system_dialogs_in_xml() {
+  local xml="$1"
+
+  if grep -Eiq "Console Warning|Console Error|Log [0-9]+ of [0-9]+|Component Stack" <<<"$xml"; then
+    log "Dismissing React Native LogBox before screenshot capture"
+    tap_xml_text "$xml" "Dismiss" || \
+      tap_xml_text "$xml" "Minimize" || \
+      adb_cmd shell input keyevent KEYCODE_ESCAPE || true
+    sleep "$ANDROID_WAIT_POLL_SECONDS"
+    return 0
+  fi
+
+  if grep -Eiq "isn.?t responding|Close app" <<<"$xml"; then
+    log "Dismissing Android system dialog before screenshot capture"
+    tap_xml_text "$xml" "Wait" || \
+      tap_xml_text "$xml" "OK" || \
+      tap_xml_text "$xml" "Close app" || \
+      adb_cmd shell input keyevent KEYCODE_ESCAPE || true
+    sleep "$ANDROID_WAIT_POLL_SECONDS"
+    return 0
+  fi
+
+  return 1
+}
+
 dismiss_system_dialogs() {
   local xml
 
   for _ in $(seq 1 3); do
     xml="$(window_xml || true)"
-    if grep -Eiq "Console Warning|Console Error|Log [0-9]+ of [0-9]+|Component Stack" <<<"$xml"; then
-      log "Dismissing React Native LogBox before screenshot capture"
-      tap_xml_text "$xml" "Dismiss" || \
-        tap_xml_text "$xml" "Minimize" || \
-        adb_cmd shell input keyevent KEYCODE_ESCAPE || true
-      sleep 1
-      continue
-    fi
-
-    if grep -Eiq "isn.?t responding|Close app" <<<"$xml"; then
-      log "Dismissing Android system dialog before screenshot capture"
-      tap_xml_text "$xml" "Wait" || \
-        tap_xml_text "$xml" "OK" || \
-        tap_xml_text "$xml" "Close app" || \
-        adb_cmd shell input keyevent KEYCODE_ESCAPE || true
-      sleep 1
-      continue
-    fi
-
-    return 0
+    dismiss_system_dialogs_in_xml "$xml" || return 0
   done
 }
-
 wait_for_text() {
   local timeout_seconds="$1"
   shift
@@ -218,15 +226,14 @@ wait_for_text() {
     local xml
     xml="$(window_xml || true)"
     if [[ -n "$xml" ]]; then
-      dismiss_system_dialogs
-      xml="$(window_xml || true)"
       for text in "${expected_texts[@]}"; do
         if grep -Fq "$text" <<<"$xml"; then
           return 0
         fi
       done
+      dismiss_system_dialogs_in_xml "$xml" || true
     fi
-    sleep 2
+    sleep "$ANDROID_WAIT_POLL_SECONDS"
   done
 
   log "Timed out waiting for text: ${expected_texts[*]}"
@@ -241,12 +248,14 @@ wait_for_text_absent() {
 
   while (( SECONDS < deadline )); do
     local xml
-    dismiss_system_dialogs
     xml="$(window_xml || true)"
     if [[ -n "$xml" ]] && ! grep -Fq "$unexpected_text" <<<"$xml"; then
       return 0
     fi
-    sleep 1
+    if [[ -n "$xml" ]]; then
+      dismiss_system_dialogs_in_xml "$xml" || true
+    fi
+    sleep "$ANDROID_WAIT_POLL_SECONDS"
   done
 
   log "Timed out waiting for text to disappear: $unexpected_text"
@@ -265,8 +274,6 @@ wait_for_all_text() {
     local missing=0
     xml="$(window_xml || true)"
     if [[ -n "$xml" ]]; then
-      dismiss_system_dialogs
-      xml="$(window_xml || true)"
       for text in "${expected_texts[@]}"; do
         if ! grep -Fq "$text" <<<"$xml"; then
           missing=1
@@ -276,8 +283,9 @@ wait_for_all_text() {
       if [[ "$missing" == "0" ]]; then
         return 0
       fi
+      dismiss_system_dialogs_in_xml "$xml" || true
     fi
-    sleep 2
+    sleep "$ANDROID_WAIT_POLL_SECONDS"
   done
 
   log "Timed out waiting for all text: ${expected_texts[*]}"
@@ -290,7 +298,7 @@ capture() {
   shift
   wait_for_text 90 "$@"
   dismiss_system_dialogs
-  sleep 2
+  sleep "$ANDROID_SCREENSHOT_SETTLE_SECONDS"
   dismiss_system_dialogs
   adb_cmd exec-out screencap -p > "$SCREENSHOT_DIR/${name}.png"
   test -s "$SCREENSHOT_DIR/${name}.png"
@@ -300,12 +308,18 @@ capture() {
 open_route() {
   local route="$1"
   log "Opening route: $route"
-  dismiss_system_dialogs
   adb_cmd shell am start -W -a android.intent.action.VIEW -d "postep://$route" -p "$APP_ID" >/dev/null || \
     adb_cmd shell am start -W -a android.intent.action.VIEW -d "postep:///$route" -p "$APP_ID" >/dev/null || \
     adb_cmd shell monkey -p "$APP_ID" 1 >/dev/null
-  sleep 4
-  dismiss_system_dialogs
+}
+
+open_route_and_wait() {
+  local route="$1"
+  local timeout_seconds="$2"
+  shift 2
+
+  open_route "$route"
+  wait_for_text "$timeout_seconds" "$@"
 }
 
 open_first_document() {
@@ -364,7 +378,6 @@ tap_accessible_label() {
     window_xml || true
     return 1
   fi
-  sleep 1
 }
 
 tap_label_and_wait() {
@@ -387,7 +400,6 @@ close_document_dialog() {
     adb_cmd shell input keyevent KEYCODE_BACK || true
   fi
   wait_for_text 30 "More document actions"
-  sleep 1
   dismiss_system_dialogs
 }
 
@@ -426,7 +438,7 @@ close_document_editor() {
         open_first_document
         return 0
       fi
-      sleep 1
+      sleep "$ANDROID_WAIT_POLL_SECONDS"
       continue
     fi
 
@@ -437,7 +449,7 @@ close_document_editor() {
     fi
 
     adb_cmd shell input swipe 540 1750 540 720 300 || true
-    sleep 1
+    sleep "$ANDROID_WAIT_POLL_SECONDS"
   done
 
   log "Could not close document edit lane"
@@ -499,7 +511,7 @@ toggle_first_fold_control() {
     fi
 
     adb_cmd shell input swipe 540 760 540 1550 250 || true
-    sleep 1
+    sleep "$ANDROID_WAIT_POLL_SECONDS"
   done
 
   if [[ "$found" != "1" ]]; then
@@ -517,7 +529,7 @@ toggle_first_fold_control() {
       found=1
       break
     fi
-    sleep 1
+    sleep "$ANDROID_WAIT_POLL_SECONDS"
   done
 
   if [[ "$found" == "1" ]]; then
@@ -527,7 +539,7 @@ toggle_first_fold_control() {
       if grep -Fq "Collapse item" <<<"$xml"; then
         return 0
       fi
-      sleep 1
+      sleep "$ANDROID_WAIT_POLL_SECONDS"
     done
   fi
 
@@ -538,7 +550,6 @@ toggle_first_fold_control() {
 
 scroll_document_once() {
   adb_cmd shell input swipe 540 1550 540 760 250 || true
-  sleep 1
 }
 
 install_apk() {
@@ -608,10 +619,9 @@ for _ in $(seq 1 150); do
   if grep -q "Android Bundled" "$EXPO_LOG"; then
     break
   fi
-  sleep 1
+  sleep "$ANDROID_WAIT_POLL_SECONDS"
 done
 grep -q "Android Bundled" "$EXPO_LOG" || { cat "$EXPO_LOG"; exit 1; }
-sleep 8
 launch_finished_at="$(now_ms)"
 launch_elapsed_ms=$((launch_finished_at - launch_started_at))
 record_metric "launch_bundle_ms" "$launch_elapsed_ms"
@@ -620,7 +630,7 @@ if [[ "$ANDROID_ENFORCE_PERFORMANCE_BUDGETS" == "1" && "$launch_elapsed_ms" -gt 
   exit 1
 fi
 
-measure_step "open_library_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route "library"
+measure_step "open_library_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route_and_wait "library" 90 "Local Org"
 capture "01-library-loaded" "Local Org"
 
 # Open the first sample document from the library.
@@ -635,13 +645,13 @@ if [[ "$ANDROID_STRICT_DOCUMENT_ASSERTIONS" == "1" ]]; then
   measure_step "document_scroll_ms" "$ANDROID_BUDGET_SCROLL_MS" scroll_document_once
 fi
 
-measure_step "open_agenda_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route "agenda"
+measure_step "open_agenda_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route_and_wait "agenda" 90 "Morning habit"
 capture "14-agenda" "Morning habit"
 
-measure_step "open_habits_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route "habits"
+measure_step "open_habits_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route_and_wait "habits" 90 "Morning habit"
 capture "15-habits" "Morning habit"
 
-measure_step "open_roam_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route "roam"
+measure_step "open_roam_ms" "$ANDROID_BUDGET_ROUTE_MS" open_route_and_wait "roam" 90 "Roam Nodes" "Knowledge Graph"
 capture "16-roam-graph" "Roam Nodes" "Knowledge Graph"
 
 write_metrics

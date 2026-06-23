@@ -45,8 +45,23 @@ export function dedupeSourceList(sources: string[]): string[] {
   return deduped;
 }
 
+function normalizeSafDocumentIdentity(path: string): string | null {
+  if (!isSafUri(path)) {
+    return null;
+  }
+  const normalized = normalizeSourceIdentity(path);
+  const authority = normalized.match(/^content:\/\/([^/]+)/)?.[1];
+  const documentMarker = "/document/";
+  const documentIndex = normalized.lastIndexOf(documentMarker);
+  if (!authority || documentIndex < 0) {
+    return null;
+  }
+  const documentId = normalized.slice(documentIndex + documentMarker.length);
+  return `content://${authority}/document/${documentId}`;
+}
+
 function normalizeDocumentIdentity(doc: DocumentRef): string {
-  return normalizeSourceIdentity(doc.path);
+  return normalizeSafDocumentIdentity(doc.path) ?? normalizeSourceIdentity(doc.path);
 }
 
 function dedupeDocuments(documents: DocumentRef[]): DocumentRef[] {

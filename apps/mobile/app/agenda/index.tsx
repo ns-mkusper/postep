@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,9 @@ import {
   Modal,
   Pressable,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { router } from "expo-router";
 
 import { type AgendaItem } from "@postep/bridge";
 import { useBridgeConfig, useOrgConfig } from "../../store/orgConfig";
@@ -18,6 +20,7 @@ import {
   loadAgendaSnapshotForConfig,
   setAgendaStatusForConfig,
 } from "../../lib/agendaSources";
+import { agendaQueryKey, hasConfiguredOrgRoots } from "../../lib/queryKeys";
 
 const STATUS_OPTIONS: Array<{ label: string; value: string }> = [
   { label: "TODO (t)", value: "TODO" },
@@ -67,7 +70,38 @@ function ageLabel(item: AgendaItem, today: string) {
   return `In ${Math.abs(age)}d`;
 }
 
-function groupByDay(items: AgendaItem[]) {
+function agendaItemKey(item: AgendaItem) {
+  return `${item.path}:${item.headline_line ?? item.title}:${item.date ?? ""}`;
+}
+
+function agendaStatusKeyword(item: AgendaItem) {
+  return item.todo_keyword ?? item.kind;
+}
+
+function agendaItemDoneLike(item: AgendaItem) {
+  return isDoneLikeStatus(agendaStatusKeyword(item));
+}
+
+function orderAgendaItems(items: AgendaItem[], preserveOrderKeys?: string[] | null) {
+  if (preserveOrderKeys?.length) {
+    const rank = new Map(preserveOrderKeys.map((key, index) => [key, index]));
+    return [...items].sort((left, right) => {
+      const leftRank = rank.get(agendaItemKey(left)) ?? Number.MAX_SAFE_INTEGER;
+      const rightRank = rank.get(agendaItemKey(right)) ?? Number.MAX_SAFE_INTEGER;
+      return leftRank - rightRank;
+    });
+  }
+  return [...items].sort((left, right) => {
+    const leftDone = agendaItemDoneLike(left);
+    const rightDone = agendaItemDoneLike(right);
+    if (leftDone === rightDone) {
+      return 0;
+    }
+    return leftDone ? 1 : -1;
+  });
+}
+
+function groupByDay(items: AgendaItem[], preserveOrderKeys?: string[] | null) {
   const today = localDateString();
   const missed = items.filter((item) => item.date && item.date < today);
   const todayItems = items.filter((item) => item.date === today);
@@ -96,7 +130,7 @@ function groupByDay(items: AgendaItem[]) {
     groups.push({
       date: today,
       title: "Today",
-      list: todayItems,
+      list: orderAgendaItems(todayItems, preserveOrderKeys),
       tone: "today",
     });
   }
@@ -104,20 +138,25 @@ function groupByDay(items: AgendaItem[]) {
     groups.push({
       date: "missed",
       title: `Missed · ${missed.length} overdue`,
-      list: missed,
+      list: orderAgendaItems(missed, preserveOrderKeys),
       tone: "missed",
     });
   }
   for (const [date, list] of Object.entries(upcomingMap).sort(
     ([left], [right]) => left.localeCompare(right),
   )) {
-    groups.push({ date, title: date, list, tone: "upcoming" });
+    groups.push({
+      date,
+      title: date,
+      list: orderAgendaItems(list, preserveOrderKeys),
+      tone: "upcoming",
+    });
   }
   if (inbox.length > 0) {
     groups.push({
       date: "unscheduled",
       title: "Inbox",
-      list: inbox,
+      list: orderAgendaItems(inbox, preserveOrderKeys),
       tone: "inbox",
     });
   }
@@ -206,55 +245,75 @@ function formatScheduleLabel(item: AgendaItem) {
   return parts.length > 0 ? parts.join(" ") : item.kind;
 }
 
+function isDoneLikeStatus(status?: string | null) {
+  const normalized = status?.toUpperCase();
+  return (
+    normalized === "DONE" ||
+    normalized === "CANCELLED" ||
+    normalized === "CANCELED"
+  );
+}
+
 export default function AgendaScreen() {
   const queryClient = useQueryClient();
   const config = useBridgeConfig();
   const hasHydratedConfig = useOrgConfig((state) => state.hasHydrated);
   const [pickerItem, setPickerItem] = useState<AgendaItem | null>(null);
+  const [preserveOrderKeys, setPreserveOrderKeys] = useState<string[] | null>(null);
+  const hasConfiguredRoots = hasConfiguredOrgRoots(config);
+  const agendaKey = agendaQueryKey(config);
 
   const agendaQuery = useQuery({
-    queryKey: [
-      "agenda",
-      config.roots.join(":"),
-      config.roamRoots?.join(":") ?? "",
-    ],
+    queryKey: agendaKey,
     queryFn: () =>
-      config.roots.length === 0 && (config.roamRoots?.length ?? 0) === 0
-        ? Promise.resolve({ items: [], habits: [] })
-        : loadAgendaSnapshotForConfig(config),
+      hasConfiguredRoots
+        ? loadAgendaSnapshotForConfig(config)
+        : Promise.resolve({ items: [], habits: [] }),
     enabled: hasHydratedConfig,
   });
 
-  useBridgeEvent("agendaChanged", () => agendaQuery.refetch());
-  useBridgeEvent("rootsChanged", () => agendaQuery.refetch());
+  const refreshAgenda = useCallback(() => {
+    setPreserveOrderKeys(null);
+    return agendaQuery.refetch();
+  }, [agendaQuery]);
+
+  useBridgeEvent("agendaChanged", refreshAgenda);
+  useBridgeEvent("rootsChanged", refreshAgenda);
+
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        setPreserveOrderKeys(null);
+      },
+      [],
+    ),
+  );
 
   const groups = useMemo(
-    () => groupByDay(agendaQuery.data?.items ?? []),
-    [agendaQuery.data?.items],
+    () => groupByDay(agendaQuery.data?.items ?? [], preserveOrderKeys),
+    [agendaQuery.data?.items, preserveOrderKeys],
   );
 
   const applyStatus = async (item: AgendaItem, status: string) => {
-    if (config.roots.length === 0 && (config.roamRoots?.length ?? 0) === 0) {
+    if (!hasConfiguredRoots) {
       return;
     }
     try {
+      setPreserveOrderKeys(groups.flatMap((group) => group.list.map(agendaItemKey)));
       const snapshot = await setAgendaStatusForConfig(
         config,
         item,
         status,
         agendaQuery.data,
       );
-      queryClient.setQueryData(
-        ["agenda", config.roots.join(":"), config.roamRoots?.join(":") ?? ""],
-        snapshot,
-      );
+      queryClient.setQueryData(agendaKey, snapshot);
     } catch (error) {
       console.warn("Failed to set agenda status", error);
     }
   };
 
   const currentStatusLabel = (item: AgendaItem) => {
-    const keyword = item.todo_keyword ?? item.kind;
+    const keyword = agendaStatusKeyword(item);
     const match = STATUS_OPTIONS.find(
       (opt) => opt.value.toUpperCase() === keyword.toUpperCase(),
     );
@@ -271,7 +330,7 @@ export default function AgendaScreen() {
         refreshControl={
           <RefreshControl
             refreshing={agendaQuery.isRefetching}
-            onRefresh={() => agendaQuery.refetch()}
+            onRefresh={refreshAgenda}
           />
         }
         renderItem={({ item }) => (
@@ -289,55 +348,74 @@ export default function AgendaScreen() {
               const contextLines = cleanAgendaContext(agenda.context);
               const repeater = formatRepeater(agenda);
               const age = ageLabel(agenda, localDateString());
+              const status = currentStatusLabel(agenda);
+              const completed = isDoneLikeStatus(status);
               return (
                 <View
                   key={`${agenda.path}:${agenda.headline_line}`}
                   testID={`agenda-card-${agenda.headline_line}`}
-                  style={styles.cardRow}
+                  style={[styles.cardRow, completed && styles.cardRowDone]}
                 >
                   <View style={styles.cardHeaderRow}>
                     <TouchableOpacity
-                      style={styles.statusChip}
+                      style={[styles.statusChip, completed && styles.statusChipDone]}
                       onPress={() => setPickerItem(agenda)}
                       testID={`agenda-status-${agenda.headline_line}`}
                     >
-                      <Text style={styles.statusChipText}>
-                        {currentStatusLabel(agenda)}
+                      <Text
+                        style={[
+                          styles.statusChipText,
+                          completed && styles.statusChipTextDone,
+                        ]}
+                      >
+                        {status}
                       </Text>
                     </TouchableOpacity>
-                    <Text style={styles.kindChip}>{agenda.kind}</Text>
-                    <Text style={styles.dateChip}>
+                    <Text style={[styles.kindChip, completed && styles.doneMutedChip]}>{agenda.kind}</Text>
+                    <Text style={[styles.dateChip, completed && styles.doneMutedChip]}>
                       {formatScheduleLabel(agenda)}
                     </Text>
                     {age && (
                       <Text
                         style={
                           agenda.date && agenda.date < localDateString()
-                            ? styles.overdueChip
-                            : styles.ageChip
+                            ? [styles.overdueChip, completed && styles.doneMutedChip]
+                            : [styles.ageChip, completed && styles.doneMutedChip]
                         }
                       >
                         {age}
                       </Text>
                     )}
                     {repeater && (
-                      <Text style={styles.repeaterChip}>{repeater}</Text>
+                      <Text style={[styles.repeaterChip, completed && styles.doneMutedChip]}>{repeater}</Text>
                     )}
                   </View>
-                  <Text style={styles.cardTitle}>{agenda.title}</Text>
+                  <TouchableOpacity
+                    activeOpacity={0.75}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/library",
+                        params: { encodedPath: encodeURIComponent(agenda.path) },
+                      })
+                    }
+                    testID={`agenda-open-note-${agenda.headline_line}`}
+                  >
+                    <Text style={[styles.cardTitle, completed && styles.cardTitleDone]}>{agenda.title}</Text>
+                  </TouchableOpacity>
                   <View style={styles.quickStatusRow}>
                     {QUICK_STATUS_OPTIONS.map((option) => (
                       <TouchableOpacity
                         key={option.value}
                         style={[
                           styles.quickStatusButton,
-                          currentStatusLabel(agenda) === option.value &&
-                            styles.quickStatusButtonActive,
+                          status === option.value && styles.quickStatusButtonActive,
+                          completed && option.value === status &&
+                            styles.quickStatusButtonDoneActive,
                         ]}
                         onPress={() => applyStatus(agenda, option.value)}
                         testID={`agenda-quick-${option.value.toLowerCase()}-${agenda.headline_line}`}
                       >
-                        <Text style={styles.quickStatusText}>
+                        <Text style={[styles.quickStatusText, completed && styles.quickStatusTextDone]}>
                           {option.label}
                         </Text>
                       </TouchableOpacity>
@@ -346,7 +424,7 @@ export default function AgendaScreen() {
                   {contextLines.length > 0 && (
                     <View style={styles.contextBlock}>
                       {contextLines.map((line, index) => (
-                        <Text key={`${line}:${index}`} style={styles.cardMeta}>
+                        <Text key={`${line}:${index}`} style={[styles.cardMeta, completed && styles.cardMetaDone]}>
                           {line}
                         </Text>
                       ))}
@@ -360,9 +438,7 @@ export default function AgendaScreen() {
         ListEmptyComponent={() => (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>
-              {!hasHydratedConfig ||
-              agendaQuery.isPending ||
-              agendaQuery.isFetching
+              {!hasHydratedConfig || agendaQuery.isPending
                 ? "Loading agenda from your Org files..."
                 : "No agenda items. Add scheduled TODOs in your Org files."}
             </Text>
@@ -432,6 +508,11 @@ const styles = StyleSheet.create({
     borderColor: "#3D4638",
     padding: 8,
   },
+  cardRowDone: {
+    backgroundColor: "#0A0F08",
+    borderColor: "#2A3328",
+    opacity: 0.82,
+  },
   cardHeaderRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -445,10 +526,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 3,
   },
+  statusChipDone: {
+    backgroundColor: "#2D3529",
+  },
   statusChipText: {
     color: "#F1F5E8",
     fontWeight: "900",
     fontSize: 10,
+  },
+  statusChipTextDone: {
+    color: "#AAB3A4",
+    textDecorationLine: "line-through",
   },
   kindChip: {
     color: "#DDE5D4",
@@ -499,12 +587,21 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     fontWeight: "800",
   },
+  doneMutedChip: {
+    color: "#8F978A",
+    backgroundColor: "#171E15",
+  },
   cardTitle: {
     color: "#F2F5EC",
     fontSize: 14,
     lineHeight: 18,
     fontWeight: "800",
     marginBottom: 5,
+  },
+  cardTitleDone: {
+    color: "#8F978A",
+    textDecorationLine: "line-through",
+    textDecorationColor: "#8F978A",
   },
   quickStatusRow: {
     flexDirection: "row",
@@ -524,11 +621,18 @@ const styles = StyleSheet.create({
     backgroundColor: "#394A23",
     borderColor: "#718049",
   },
+  quickStatusButtonDoneActive: {
+    backgroundColor: "#2D3529",
+    borderColor: "#5D6658",
+  },
   quickStatusText: {
     color: "#DDE5D4",
     fontSize: 10,
     lineHeight: 13,
     fontWeight: "800",
+  },
+  quickStatusTextDone: {
+    color: "#AAB3A4",
   },
   contextBlock: {
     gap: 2,
@@ -537,6 +641,9 @@ const styles = StyleSheet.create({
     color: "#C6CDBF",
     fontSize: 11,
     lineHeight: 14,
+  },
+  cardMetaDone: {
+    color: "#828A7D",
   },
   empty: {
     flex: 1,

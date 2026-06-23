@@ -15,7 +15,17 @@ if (__DEV__ && process.env.EXPO_PUBLIC_POSTEP_E2E === '1') {
 
 export default function RootLayout() {
   const scheme = useColorScheme();
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(() => new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 15 * 60 * 1000,
+        gcTime: 60 * 60 * 1000,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
+      },
+    },
+  }));
   const hydrateOrgConfig = useOrgConfig((state) => state.hydrate);
   const dark = scheme === 'dark';
 

@@ -42,7 +42,8 @@ export async function loadAgendaSnapshotForConfig(
   }
 
   const startedAt = Date.now();
-  const documents = (await listDocumentsForConfig(config)).slice(
+  const agendaConfig = agendaDocumentConfig(config);
+  const documents = (await listDocumentsForConfig(agendaConfig)).slice(
     0,
     AGENDA_LOAD_LIMIT,
   );
@@ -52,7 +53,7 @@ export async function loadAgendaSnapshotForConfig(
     async (doc) => {
       try {
         const payload = await withTimeout(
-          loadDocumentForConfig(config, doc.path),
+          loadDocumentForConfig(agendaConfig, doc.path),
           AGENDA_DOC_LOAD_TIMEOUT_MS,
           `Timed out reading ${doc.name}`,
         );
@@ -110,17 +111,31 @@ export async function setAgendaStatusForConfig(
   const lines = payload.raw.split("\n");
   const current = lines[item.headline_line];
   if (current) {
-    lines[item.headline_line] = replaceHeadingStatus(current, status);
+    const expectedHeading = replaceHeadingStatus(current, status);
+    lines[item.headline_line] = expectedHeading;
     const updated = await updateDocumentForConfig({
       roots: config.roots,
       roamRoots: config.roamRoots,
       path: item.path,
       raw: lines.join("\n"),
     });
-    const changedSnapshot = buildAgendaFromDocument(
-      updated.path,
+    assertSafWriteContainsHeading(
       updated.raw,
-      updated.lexical,
+      item.headline_line,
+      expectedHeading,
+      "agenda status",
+    );
+    const readback = await loadDocumentForConfig(config, item.path);
+    assertSafWriteContainsHeading(
+      readback.raw,
+      item.headline_line,
+      expectedHeading,
+      "agenda status readback",
+    );
+    const changedSnapshot = buildAgendaFromDocument(
+      readback.path,
+      readback.raw,
+      readback.lexical,
     );
     if (previousSnapshot) {
       return mergeChangedDocumentSnapshot(
@@ -145,16 +160,17 @@ export async function completeHabitForConfig(
   const payload = await loadDocumentForConfig(config, item.path);
   const lines = payload.raw.split("\n");
   const nextRaw = completeHabitRaw(lines, item);
-  const updated = await updateDocumentForConfig({
+  await updateDocumentForConfig({
     roots: config.roots,
     roamRoots: config.roamRoots,
     path: item.path,
     raw: nextRaw,
   });
+  const readback = await loadDocumentForConfig(config, item.path);
   const changedSnapshot = buildAgendaFromDocument(
-    updated.path,
-    updated.raw,
-    updated.lexical,
+    readback.path,
+    readback.raw,
+    readback.lexical,
   );
   if (previousSnapshot) {
     return mergeChangedDocumentSnapshot(
@@ -212,6 +228,27 @@ function hasSafRoots(config: OrgBridgeConfig): boolean {
   return (
     config.roots.some(isSafUri) || (config.roamRoots?.some(isSafUri) ?? false)
   );
+}
+
+function agendaDocumentConfig(config: OrgBridgeConfig): OrgBridgeConfig {
+  if (config.roots.length > 0) {
+    return { roots: config.roots };
+  }
+  return config;
+}
+
+function assertSafWriteContainsHeading(
+  raw: string,
+  lineNumber: number,
+  expectedHeading: string,
+  label: string,
+): void {
+  const actual = raw.split("\n")[lineNumber];
+  if (actual !== expectedHeading) {
+    throw new Error(
+      `Postep ${label} write verification failed at line ${lineNumber + 1}`,
+    );
+  }
 }
 
 function buildAgendaFromDocument(
@@ -272,9 +309,14 @@ function buildAgendaFromDocument(
       continue;
     }
 
+    const rawDate = timestampDate(planning?.text);
+    const repeater = repeaterFromTimestamp(planning?.text);
+    const scheduledRawDate = timestampDate(scheduled?.text);
+    const scheduledRepeater = repeaterFromTimestamp(scheduled?.text);
+
     items.push({
       title: heading.text,
-      date: timestampDate(planning?.text) ?? null,
+      date: effectiveAgendaDate(rawDate, repeater),
       time: planning?.text?.match(/\b\d{2}:\d{2}\b/)?.[0] ?? null,
       context: contextFromNodes(bodyNodes),
       path,
@@ -282,13 +324,13 @@ function buildAgendaFromDocument(
       todo_keyword: heading.todo_keyword,
       kind: scheduled ? "Scheduled" : deadline ? "Deadline" : "Floating",
       timestamp_raw: planning?.text ?? null,
-      repeater: repeaterFromTimestamp(planning?.text),
+      repeater,
     });
 
     if (styleHabit) {
       habits.push({
         title: `${heading.todo_keyword ? `${heading.todo_keyword} ` : ""}${heading.text}`,
-        scheduled: timestampDate(scheduled?.text) ?? null,
+        scheduled: effectiveAgendaDate(scheduledRawDate, scheduledRepeater),
         description: bodyNodes
           .filter((node) => node.type === "list_item")
           .map((node) => `- ${node.text}`)
@@ -422,7 +464,7 @@ function completeHabitRaw(lines: string[], item: AgendaItem): string {
   if (planningLine >= 0) {
     lines[planningLine] = replaceFirstDate(
       lines[planningLine],
-      nextRepeaterDate(item.date, item.repeater),
+      nextRepeaterDateAfter(timestampDate(item.timestamp_raw) ?? item.date, item.repeater, today),
     );
   }
   upsertLastRepeat(lines, item.headline_line, rangeEnd, today);
@@ -457,10 +499,13 @@ function findPlanningLine(lines: string[], start: number, end: number): number {
 }
 
 function replaceFirstDate(line: string, date: string): string {
-  return line.replace(/\d{4}-\d{2}-\d{2}/, date);
+  return line.replace(
+    /(\d{4}-\d{2}-\d{2})(?:\s+[A-Z][a-z]{2})?/,
+    `${date} ${weekdayName(new Date(`${date}T12:00:00`))}`,
+  );
 }
 
-function nextRepeaterDate(
+function addRepeaterInterval(
   date: string,
   repeater: NonNullable<AgendaItem["repeater"]>,
 ): string {
@@ -475,6 +520,34 @@ function nextRepeaterDate(
     next.setFullYear(next.getFullYear() + repeater.amount);
   }
   return localDateString(next);
+}
+
+function nextRepeaterDateAfter(
+  date: string,
+  repeater: NonNullable<AgendaItem["repeater"]>,
+  today = localDateString(),
+): string {
+  let next = addRepeaterInterval(date, repeater);
+  let guard = 0;
+  while (next <= today && guard < 5000) {
+    next = addRepeaterInterval(next, repeater);
+    guard += 1;
+  }
+  return next;
+}
+
+function effectiveAgendaDate(
+  date: string | null,
+  repeater: AgendaItem["repeater"],
+  today = localDateString(),
+): string | null {
+  if (!date) {
+    return null;
+  }
+  if (!repeater || date >= today) {
+    return date;
+  }
+  return today;
 }
 
 function localDateString(date = new Date()): string {

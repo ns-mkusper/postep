@@ -13,6 +13,7 @@ import type { LexicalProjectionNode } from "../lib/orgLexicalModel";
 interface LexicalDocumentProps {
   value: LexicalProjectionNode[];
   readOnly?: boolean;
+  readerMode?: boolean;
   selectedKey?: string | null;
   onSelectNode?: (node: LexicalProjectionNode, index: number, key: string) => void;
 }
@@ -127,7 +128,11 @@ function textStyleFor(node: LexicalProjectionNode, theme: ThemeTokens): TextStyl
   return base;
 }
 
-function renderInline(text: string, theme: ThemeTokens) {
+function renderInline(text: string, theme: ThemeTokens, readerMode: boolean) {
+  if (!readerMode) {
+    return <RNText>{text}</RNText>;
+  }
+
   return parseInline(text).map((part, index) => {
     if (part.type === "link") {
       return (
@@ -153,7 +158,7 @@ function renderInline(text: string, theme: ThemeTokens) {
   });
 }
 
-function renderRichText(node: LexicalProjectionNode, theme: ThemeTokens) {
+function renderRichText(node: LexicalProjectionNode, theme: ThemeTokens, readerMode: boolean) {
   if (node.type === "heading") {
     const text = nodeText(node);
     const { body, tags } = splitTags(text);
@@ -170,7 +175,7 @@ function renderRichText(node: LexicalProjectionNode, theme: ThemeTokens) {
         {node.priority ? (
           <RNText style={[styles.priorityText, { color: theme.priority }]}>#{node.priority} </RNText>
         ) : null}
-        {renderInline(todoParts.body, theme)}
+        {renderInline(todoParts.body, theme, readerMode)}
         {allTags.length > 0 ? (
           <RNText style={[styles.tagsText, { color: theme.tag }]}> {allTags.map((tag) => `#${tag}`).join(" ")}</RNText>
         ) : null}
@@ -191,15 +196,15 @@ function renderRichText(node: LexicalProjectionNode, theme: ThemeTokens) {
   if (node.type === "directive") {
     return (
       <RNText style={textStyleFor(node, theme)}>
-        {node.keyword ? `${node.keyword}: ` : ""}{renderInline(nodeText(node), theme)}
+        {node.keyword ? `${node.keyword}: ` : ""}{renderInline(nodeText(node), theme, readerMode)}
       </RNText>
     );
   }
 
-  return <RNText style={textStyleFor(node, theme)}>{renderInline(nodeText(node), theme)}</RNText>;
+  return <RNText style={textStyleFor(node, theme)}>{renderInline(nodeText(node), theme, readerMode)}</RNText>;
 }
 
-export function LexicalDocument({ value, selectedKey, onSelectNode }: LexicalDocumentProps) {
+export function LexicalDocument({ value, readerMode = true, selectedKey, onSelectNode }: LexicalDocumentProps) {
   const scheme = useColorScheme();
   const theme = documentTheme(scheme === "dark");
   const [foldedKeys, setFoldedKeys] = useState<Set<string>>(() => new Set());
@@ -298,7 +303,7 @@ export function LexicalDocument({ value, selectedKey, onSelectNode }: LexicalDoc
               ) : null}
             </View>
             <View style={styles.textColumn}>
-              {renderRichText(element, theme)}
+              {renderRichText(element, theme, readerMode)}
               {canFold ? (
                 <TouchableOpacity
                   style={[styles.foldButton, { borderColor: theme.foldBorder, backgroundColor: theme.foldBg }]}

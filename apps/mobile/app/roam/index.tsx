@@ -11,9 +11,10 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 
-import { useBridgeConfig } from "../../store/orgConfig";
+import { useBridgeConfig, useOrgConfig } from "../../store/orgConfig";
 import { useBridgeEvent } from "../../hooks/useBridgeEvent";
 import { loadRoamGraphForConfig } from "../../lib/roamSources";
+import { hasConfiguredOrgRoots, roamQueryKey } from "../../lib/queryKeys";
 import {
   buildRoamExplorerView,
   type RoamNodeSummary,
@@ -35,6 +36,8 @@ const FILTERS: FilterOption[] = [
 
 export default function RoamScreen() {
   const config = useBridgeConfig();
+  const hasHydratedConfig = useOrgConfig((state) => state.hasHydrated);
+  const hasConfiguredRoots = hasConfiguredOrgRoots(config);
   const [mode, setMode] = useState<RoamPanel>("graph");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -44,15 +47,12 @@ export default function RoamScreen() {
     useState<RoamRelationshipFilter>("all");
 
   const roamQuery = useQuery({
-    queryKey: [
-      "roam",
-      config.roots.join(":"),
-      config.roamRoots?.join(":") ?? "",
-    ],
+    queryKey: roamQueryKey(config),
     queryFn: () =>
-      config.roots.length === 0 && (config.roamRoots?.length ?? 0) === 0
-        ? Promise.resolve({ nodes: [], links: [] })
-        : loadRoamGraphForConfig(config),
+      hasConfiguredRoots
+        ? loadRoamGraphForConfig(config)
+        : Promise.resolve({ nodes: [], links: [] }),
+    enabled: hasHydratedConfig,
   });
 
   useBridgeEvent("documentsChanged", () => roamQuery.refetch());
@@ -80,7 +80,10 @@ export default function RoamScreen() {
   };
 
   const openNode = (node: RoamNodeSummary) => {
-    router.push({ pathname: "/library", params: { path: node.path } });
+    router.push({
+      pathname: "/library",
+      params: { encodedPath: encodeURIComponent(node.path) },
+    });
   };
 
   const toggleTag = (tag: string) => {
@@ -96,7 +99,11 @@ export default function RoamScreen() {
         </View>
         <View style={styles.statusPill} testID="roam-source-status">
           <Text style={styles.statusText}>
-            {roamQuery.isFetching ? "Refreshing" : `${explorer.summary.nodes} notes`}
+            {roamQuery.isPending && !roamQuery.data
+              ? "Loading"
+              : roamQuery.isRefetching
+                ? "Refreshing"
+                : `${explorer.summary.nodes} notes`}
           </Text>
         </View>
       </View>
