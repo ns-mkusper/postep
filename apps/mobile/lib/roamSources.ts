@@ -4,7 +4,7 @@ import {
   type RoamGraph,
 } from "@postep/bridge";
 
-import { isSafUri } from "./documentSources";
+import { dedupeSourceList, isSafUri, normalizeSourceIdentity } from "./documentSources";
 
 const ROAM_LOAD_CONCURRENCY = 12;
 const ROAM_DOC_LOAD_TIMEOUT_MS = 2000;
@@ -18,7 +18,7 @@ export async function loadRoamGraphForConfig(
   config: OrgBridgeConfig,
 ): Promise<RoamGraph> {
   const nativeConfig = splitNativeConfig(config);
-  const safRoamRoots = config.roamRoots?.filter(isSafUri) ?? [];
+  const safRoamRoots = dedupeSourceList(config.roamRoots?.filter(isSafUri) ?? []);
   const graphs: RoamGraph[] = [];
 
   if (
@@ -36,8 +36,8 @@ export async function loadRoamGraphForConfig(
 }
 
 function splitNativeConfig(config: OrgBridgeConfig): OrgBridgeConfig {
-  const roots = config.roots.filter((root) => !isSafUri(root));
-  const roamRoots = config.roamRoots?.filter((root) => !isSafUri(root)) ?? [];
+  const roots = dedupeSourceList(config.roots.filter((root) => !isSafUri(root)));
+  const roamRoots = dedupeSourceList(config.roamRoots?.filter((root) => !isSafUri(root)) ?? []);
   return {
     roots,
     ...(roamRoots.length > 0 ? { roamRoots } : {}),
@@ -50,7 +50,7 @@ async function loadSafRoamGraph(roots: string[]): Promise<RoamGraph> {
   );
   const files: SafOrgFile[] = [];
 
-  for (const root of roots) {
+  for (const root of dedupeSourceList(roots)) {
     const listing = await listOrgFilesRecursively(root);
     console.log("Postep SAF roam listing", {
       root,
@@ -160,7 +160,7 @@ function mergeGraphs(graphs: RoamGraph[]): RoamGraph {
 function dedupeFiles(files: SafOrgFile[]): SafOrgFile[] {
   const byUri = new Map<string, SafOrgFile>();
   for (const file of files) {
-    byUri.set(file.uri, file);
+    byUri.set(normalizeSourceIdentity(file.uri), file);
   }
   return [...byUri.values()].sort((left, right) =>
     left.name.localeCompare(right.name),

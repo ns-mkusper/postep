@@ -14,6 +14,7 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useOrgConfig } from "../../store/orgConfig";
+import { dedupeSourceList, normalizeSourceIdentity } from "../../lib/documentSources";
 
 const ANDROID_STATUS_BAR_FALLBACK = 58;
 
@@ -144,9 +145,14 @@ export default function SettingsScreen() {
     if (!isAndroid || loadingSource) {
       return;
     }
+    const orgRootIdentities = new Set(
+      dedupeSourceList(roots).map(normalizeSourceIdentity),
+    );
     const configuredRoots: Array<{ kind: "org" | "roam"; root: string }> = [
-      ...roots.map((root) => ({ kind: "org" as const, root })),
-      ...roamRoots.map((root) => ({ kind: "roam" as const, root })),
+      ...dedupeSourceList(roots).map((root) => ({ kind: "org" as const, root })),
+      ...dedupeSourceList(roamRoots)
+        .filter((root) => !orgRootIdentities.has(normalizeSourceIdentity(root)))
+        .map((root) => ({ kind: "roam" as const, root })),
     ].filter((configured) => configured.root.startsWith("content://"));
     if (configuredRoots.length === 0) {
       setPickerStatus("No configured Android SAF folders to verify.");

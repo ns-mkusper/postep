@@ -39,6 +39,7 @@ export default function RoamScreen() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [statsExpanded, setStatsExpanded] = useState(false);
   const [relationshipFilter, setRelationshipFilter] =
     useState<RoamRelationshipFilter>("all");
 
@@ -157,13 +158,29 @@ export default function RoamScreen() {
         )}
       </View>
 
-      <View style={styles.statsGrid} testID="roam-graph-mode">
-        <StatCard label="Notes" value={String(explorer.summary.nodes)} />
-        <StatCard label="Links" value={String(explorer.summary.links)} />
-        <StatCard label="Tags" value={String(explorer.summary.tags)} />
-        <StatCard label="Isolated" value={String(explorer.summary.isolated)} />
-        <StatCard label="Density" value={explorer.summary.density.toFixed(2)} />
-      </View>
+      <TouchableOpacity
+        style={styles.statsCard}
+        testID="roam-graph-mode"
+        onPress={() => setStatsExpanded((expanded) => !expanded)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: statsExpanded }}
+      >
+        <View style={styles.statsCollapsedRow}>
+          <Text style={styles.statsToggleText} numberOfLines={1}>
+            Knowledge graph stats
+          </Text>
+          <Text style={styles.statsChevron}>{statsExpanded ? "Hide" : "Show"}</Text>
+        </View>
+        {statsExpanded && (
+          <View style={styles.statsExpandedGrid}>
+            <StatCard label="Notes" value={String(explorer.summary.nodes)} />
+            <StatCard label="Links" value={String(explorer.summary.links)} />
+            <StatCard label="Tags" value={String(explorer.summary.tags)} />
+            <StatCard label="Isolated" value={String(explorer.summary.isolated)} />
+            <StatCard label="Density" value={explorer.summary.density.toFixed(2)} />
+          </View>
+        )}
+      </TouchableOpacity>
 
       <Text style={styles.sectionLabel}>Matching notes</Text>
       <FlatList
@@ -368,27 +385,27 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#071008",
-    padding: 14,
+    padding: 8,
   },
   headerRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    gap: 12,
-    marginBottom: 14,
+    gap: 8,
+    marginBottom: 8,
   },
   kicker: {
     color: "#9BA394",
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 10,
+    lineHeight: 13,
     fontWeight: "800",
     textTransform: "uppercase",
-    letterSpacing: 1.2,
+    letterSpacing: 0.8,
   },
   header: {
     color: "#F2F5EC",
-    fontSize: 28,
-    lineHeight: 34,
+    fontSize: 20,
+    lineHeight: 24,
     fontWeight: "800",
   },
   statusPill: {
@@ -396,24 +413,24 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#3D4638",
     backgroundColor: "#111A10",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
   statusText: {
     color: "#DDE5D4",
-    fontSize: 13,
+    fontSize: 10,
     fontWeight: "800",
   },
   modeRow: {
     flexDirection: "row",
-    gap: 8,
-    marginBottom: 12,
+    gap: 6,
+    marginBottom: 8,
   },
   modeButton: {
-    borderRadius: 12,
+    borderRadius: 8,
     backgroundColor: "#111A10",
-    paddingHorizontal: 13,
-    paddingVertical: 9,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
     borderWidth: 1,
     borderColor: "#303B2D",
   },
@@ -425,38 +442,38 @@ const styles = StyleSheet.create({
     color: "#F2F5EC",
     textTransform: "capitalize",
     fontWeight: "800",
-    fontSize: 16,
+    fontSize: 11,
   },
   searchCard: {
     backgroundColor: "#091108",
-    borderRadius: 18,
-    padding: 12,
-    borderWidth: 1.5,
+    borderRadius: 12,
+    padding: 8,
+    borderWidth: 1,
     borderColor: "#3D4638",
-    marginBottom: 14,
+    marginBottom: 8,
   },
   searchInput: {
     color: "#F2F5EC",
-    borderRadius: 12,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: "#303B2D",
     backgroundColor: "#071008",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-    marginBottom: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    fontSize: 11,
+    marginBottom: 6,
   },
   filterRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 5,
   },
   filterChip: {
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "#303B2D",
-    paddingHorizontal: 11,
-    paddingVertical: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
     backgroundColor: "#111A10",
   },
   filterChipSelected: {
@@ -466,56 +483,84 @@ const styles = StyleSheet.create({
   filterText: {
     color: "#DDE5D4",
     fontWeight: "800",
-    fontSize: 13,
+    fontSize: 10,
   },
   clearButton: {
-    marginTop: 10,
+    marginTop: 6,
     alignSelf: "flex-start",
   },
   clearText: {
     color: "#BDD18A",
+    fontSize: 10,
     fontWeight: "800",
   },
-  statsGrid: {
+  statsCard: {
+    backgroundColor: "#091108",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    marginBottom: 8,
+  },
+  statsCollapsedRow: {
+    minHeight: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  statsToggleText: {
+    flex: 1,
+    color: "#C9D1C0",
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: "700",
+  },
+  statsChevron: {
+    color: "#BDD18A",
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  statsExpandedGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 14,
+    gap: 5,
+    marginTop: 5,
   },
   statCard: {
-    minWidth: 96,
+    minWidth: 58,
     flexGrow: 1,
-    backgroundColor: "#091108",
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1.5,
-    borderColor: "#3D4638",
+    backgroundColor: "#111A10",
+    borderRadius: 7,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
   },
   statValue: {
     color: "#F2F5EC",
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 12,
+    lineHeight: 15,
     fontWeight: "800",
   },
   statLabel: {
     color: "#9BA394",
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 9,
+    lineHeight: 12,
     fontWeight: "700",
   },
   nodeList: {
-    paddingVertical: 8,
-    paddingRight: 16,
+    paddingVertical: 5,
+    paddingRight: 8,
   },
   nodeChip: {
-    borderRadius: 14,
+    borderRadius: 9,
     borderWidth: 1,
     borderColor: "#3D4638",
-    paddingVertical: 11,
-    paddingHorizontal: 16,
-    marginRight: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 9,
+    marginRight: 6,
     backgroundColor: "#091108",
-    minWidth: 150,
+    minWidth: 105,
   },
   nodeChipSelected: {
     backgroundColor: "#1E271B",
@@ -523,29 +568,29 @@ const styles = StyleSheet.create({
   },
   nodeChipText: {
     color: "#DDE5D4",
-    fontSize: 17,
-    lineHeight: 23,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: "800",
   },
   nodeChipMeta: {
     color: "#9BA394",
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 3,
+    fontSize: 9,
+    lineHeight: 12,
+    marginTop: 2,
   },
   selectedCard: {
-    marginTop: 12,
+    marginTop: 7,
     backgroundColor: "#14200F",
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1.5,
+    borderRadius: 12,
+    padding: 8,
+    borderWidth: 1,
     borderColor: "#66774A",
   },
   selectedHeaderRow: {
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
-    gap: 12,
+    gap: 8,
   },
   selectedTitleBlock: {
     flex: 1,
@@ -553,71 +598,71 @@ const styles = StyleSheet.create({
   openNoteButton: {
     borderRadius: 999,
     backgroundColor: "#BDD18A",
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
   },
   openNoteButtonText: {
     color: "#071008",
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 10,
+    lineHeight: 13,
     fontWeight: "900",
   },
   detailCard: {
-    marginTop: 14,
+    marginTop: 8,
     backgroundColor: "#091108",
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1.5,
+    borderRadius: 12,
+    padding: 8,
+    borderWidth: 1,
     borderColor: "#3D4638",
   },
   detailTitle: {
     color: "#F2F5EC",
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: "800",
   },
   detailPath: {
     color: "#8C9486",
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 5,
+    fontSize: 9,
+    lineHeight: 12,
+    marginTop: 2,
   },
   noteMetaRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 12,
-    marginBottom: 10,
+    gap: 4,
+    marginTop: 6,
+    marginBottom: 5,
   },
   noteMeta: {
     color: "#DDE5D4",
     backgroundColor: "#223018",
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
     overflow: "hidden",
-    fontSize: 13,
+    fontSize: 9,
     fontWeight: "800",
   },
   sectionLabel: {
     color: "#9BA394",
-    fontSize: 13,
+    fontSize: 10,
     textTransform: "uppercase",
-    marginTop: 8,
-    marginBottom: 8,
+    marginTop: 5,
+    marginBottom: 5,
     fontWeight: "800",
-    letterSpacing: 0.8,
+    letterSpacing: 0.5,
   },
   tagRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 4,
   },
   tagChip: {
     backgroundColor: "#1E271B",
-    borderRadius: 11,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    borderRadius: 7,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
     borderWidth: 1,
     borderColor: "#3D4638",
   },
@@ -627,48 +672,48 @@ const styles = StyleSheet.create({
   },
   smallTagChip: {
     backgroundColor: "#1E271B",
-    borderRadius: 11,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
+    borderRadius: 7,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
   },
   tagText: {
     color: "#CDD5C5",
-    fontSize: 15,
+    fontSize: 10,
     fontWeight: "700",
   },
   relationshipItem: {
     borderTopWidth: 1,
     borderTopColor: "#1F2A1C",
-    paddingVertical: 10,
+    paddingVertical: 5,
   },
   relationshipTitle: {
     color: "#DDE5D4",
-    fontSize: 18,
-    lineHeight: 25,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: "800",
   },
   relationshipMeta: {
     color: "#8C9486",
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 2,
+    fontSize: 9,
+    lineHeight: 12,
+    marginTop: 1,
   },
   empty: {
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
-    minWidth: 260,
+    padding: 14,
+    minWidth: 190,
   },
   emptyText: {
     color: "#8C9486",
-    fontSize: 18,
-    lineHeight: 25,
+    fontSize: 11,
+    lineHeight: 15,
     textAlign: "center",
   },
   emptyTextLeft: {
     color: "#8C9486",
-    fontSize: 16,
-    lineHeight: 23,
-    marginBottom: 6,
+    fontSize: 10,
+    lineHeight: 14,
+    marginBottom: 4,
   },
 });

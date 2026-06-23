@@ -1,15 +1,14 @@
-import assert from 'node:assert/strict';
-import { describe, it, afterEach } from 'node:test';
-import { performance } from 'node:perf_hooks';
+import assert from "node:assert/strict";
+import { describe, it, afterEach } from "node:test";
+import { performance } from "node:perf_hooks";
 
+import { listDocumentsForConfig } from "../lib/documentSources";
 import {
-  listDocumentsForConfig,
-} from '../lib/documentSources';
-import {
+  completeHabitForConfig,
   loadAgendaSnapshotForConfig,
   setAgendaStatusForConfig,
-} from '../lib/agendaSources';
-import type { OrgBridgeConfig } from '@postep/bridge';
+} from "../lib/agendaSources";
+import type { OrgBridgeConfig } from "@postep/bridge";
 
 declare const globalThis: typeof global & {
   __postepContentUri?: {
@@ -28,15 +27,15 @@ declare const globalThis: typeof global & {
 
 globalThis.performance = performance as unknown as Performance;
 
-const rootUri = 'content://com.google.android.apps.docs.storage/document/root';
+const rootUri = "content://com.google.android.apps.docs.storage/document/root";
 const config: OrgBridgeConfig = { roots: [rootUri], roamRoots: [] };
 
 afterEach(() => {
   delete globalThis.__postepContentUri;
 });
 
-describe('SAF-backed agenda sources', () => {
-  it('filters Google Drive SAF listings and Emacs temp files before rendering notes', async () => {
+describe("SAF-backed agenda sources", () => {
+  it("filters Google Drive SAF listings and Emacs temp files before rendering notes", async () => {
     installDriveMock(makeDriveDocs(8));
 
     const documents = await listDocumentsForConfig(config);
@@ -45,19 +44,35 @@ describe('SAF-backed agenda sources', () => {
     assert.deepEqual(
       documents.map((doc) => doc.name),
       [
-        'drive-01.org',
-        'drive-02.org',
-        'drive-03.org',
-        'drive-04.org',
-        'drive-05.org',
-        'drive-06.org',
-        'drive-07.org',
-        'drive-08.org',
+        "drive-01.org",
+        "drive-02.org",
+        "drive-03.org",
+        "drive-04.org",
+        "drive-05.org",
+        "drive-06.org",
+        "drive-07.org",
+        "drive-08.org",
       ],
     );
   });
 
-  it('loads a non-empty agenda from Google Drive content URIs inside the refresh goal', async () => {
+  it("dedupes documents listed from both local org and roam SAF roots", async () => {
+    const { listCalls } = installDriveMock(makeDriveDocs(3));
+
+    const documents = await listDocumentsForConfig({
+      roots: [rootUri],
+      roamRoots: [rootUri, rootUri],
+    });
+
+    assert.equal(listCalls(), 1);
+    assert.equal(documents.length, 3);
+    assert.deepEqual(
+      documents.map((doc) => doc.name),
+      ["drive-01.org", "drive-02.org", "drive-03.org"],
+    );
+  });
+
+  it("loads a non-empty agenda from Google Drive content URIs inside the refresh goal", async () => {
     const { maxActiveReads } = installDriveMock(makeDriveDocs(48), {
       readDelayMs: 8,
     });
@@ -68,43 +83,96 @@ describe('SAF-backed agenda sources', () => {
 
     assert.equal(snapshot.items.length, 160);
     assert.equal(snapshot.habits.length, 16);
-    assert.ok(snapshot.items.some((item) => item.title === 'Drive task 1'));
-    assert.ok(snapshot.items.some((item) => item.kind === 'Floating'));
+    assert.ok(snapshot.items.some((item) => item.title === "Drive task 1"));
+    assert.ok(snapshot.items.some((item) => item.kind === "Floating"));
     assert.ok(
       snapshot.items.some(
         (item) =>
-          item.title === 'Drive habit 3' &&
+          item.title === "Drive habit 3" &&
           item.repeater?.amount === 1 &&
-          item.repeater.unit === 'Week',
+          item.repeater.unit === "Week",
       ),
     );
-    assert.ok(maxActiveReads() <= 12, `read concurrency reached ${maxActiveReads()}`);
+    assert.ok(
+      maxActiveReads() <= 12,
+      `read concurrency reached ${maxActiveReads()}`,
+    );
     assert.ok(elapsedMs < 10000, `SAF agenda refresh took ${elapsedMs}ms`);
   });
 
-  it('skips unreadable Drive files and still returns the rest of the agenda', async () => {
+  it("skips unreadable Drive files and still returns the rest of the agenda", async () => {
     installDriveMock(makeDriveDocs(12), {
-      brokenUris: new Set([driveUri('drive-05.org')]),
+      brokenUris: new Set([driveUri("drive-05.org")]),
     });
 
     const snapshot = await loadAgendaSnapshotForConfig(config);
 
     assert.ok(snapshot.items.length > 0);
-    assert.ok(!snapshot.items.some((item) => item.path.endsWith('drive-05.org')));
-    assert.ok(snapshot.items.some((item) => item.path.endsWith('drive-06.org')));
+    assert.ok(
+      !snapshot.items.some((item) => item.path.endsWith("drive-05.org")),
+    );
+    assert.ok(
+      snapshot.items.some((item) => item.path.endsWith("drive-06.org")),
+    );
   });
 
-  it('writes agenda status changes back through the content URI writer', async () => {
+  it("writes agenda status changes back through the content URI writer", async () => {
     const { docs, writes } = installDriveMock(makeDriveDocs(3));
     const initial = await loadAgendaSnapshotForConfig(config);
-    const item = initial.items.find((candidate) => candidate.title === 'Drive task 1');
+    const item = initial.items.find(
+      (candidate) => candidate.title === "Drive task 1",
+    );
     assert.ok(item);
 
-    const updated = await setAgendaStatusForConfig(config, item, 'DONE');
+    const updated = await setAgendaStatusForConfig(
+      config,
+      item,
+      "DONE",
+      initial,
+    );
 
     assert.equal(writes.length, 1);
-    assert.match(docs.get(driveUri('drive-01.org')) ?? '', /^\* DONE Drive task 1/m);
-    assert.ok(updated.items.some((candidate) => candidate.todo_keyword === 'DONE'));
+    assert.match(
+      docs.get(driveUri("drive-01.org")) ?? "",
+      /^\* DONE Drive task 1/m,
+    );
+    assert.ok(
+      updated.items.some((candidate) => candidate.todo_keyword === "DONE"),
+    );
+  });
+
+  it("completes SAF habits by advancing repeaters and writing org-habit metadata", async () => {
+    const { docs, writes } = installDriveMock(makeDriveDocs(3));
+    const initial = await loadAgendaSnapshotForConfig(config);
+    const habit = initial.habits.find((candidate) =>
+      candidate.title.includes("Drive habit 3"),
+    );
+    assert.ok(habit);
+    assert.equal(habit.path, driveUri("drive-03.org"));
+    assert.equal(typeof habit.headline_line, "number");
+    const item = initial.items.find(
+      (candidate) =>
+        candidate.path === habit.path &&
+        candidate.headline_line === habit.headline_line,
+    );
+    assert.ok(item);
+
+    const updated = await completeHabitForConfig(config, item, initial);
+    const raw = docs.get(driveUri("drive-03.org")) ?? "";
+    const today = localDateString();
+
+    assert.equal(writes.length, 1);
+    assert.match(raw, /SCHEDULED: <2026-06-11 Tue 07:30 \+\+1w>/);
+    assert.ok(raw.includes(`:LAST_REPEAT: [${today} `));
+    assert.ok(raw.includes(`State "DONE" from "TODO" [${today} `));
+    assert.ok(
+      updated.habits.some(
+        (candidate) =>
+          candidate.path === habit.path &&
+          candidate.headline_line === habit.headline_line &&
+          candidate.last_repeat === today,
+      ),
+    );
   });
 });
 
@@ -112,8 +180,8 @@ function makeDriveDocs(count: number): Map<string, string> {
   return new Map(
     Array.from({ length: count }, (_unused, idx) => {
       const number = idx + 1;
-      const padded = String(number).padStart(2, '0');
-      const day = String((number % 20) + 1).padStart(2, '0');
+      const padded = String(number).padStart(2, "0");
+      const day = String((number % 20) + 1).padStart(2, "0");
       const maybeHabit =
         number % 3 === 0
           ? `
@@ -124,7 +192,7 @@ SCHEDULED: <2026-06-${day} Tue 07:30 ++1w>
 :END:
 - [ ] open Postep
 `
-          : '';
+          : "";
       return [
         driveUri(`drive-${padded}.org`),
         `#+TITLE: Drive sample ${number}
@@ -151,20 +219,24 @@ function installDriveMock(
   docs: Map<string, string>;
   writes: Array<{ uri: string; contents: string }>;
   maxActiveReads: () => number;
+  listCalls: () => number;
 } {
   let activeReads = 0;
   let maxReads = 0;
   const writes: Array<{ uri: string; contents: string }> = [];
+  let listings = 0;
   globalThis.__postepContentUri = {
     async readAsString(uri: string) {
       activeReads += 1;
       maxReads = Math.max(maxReads, activeReads);
       try {
         if (options.readDelayMs) {
-          await new Promise((resolve) => setTimeout(resolve, options.readDelayMs));
+          await new Promise((resolve) =>
+            setTimeout(resolve, options.readDelayMs),
+          );
         }
         if (options.brokenUris?.has(uri)) {
-          throw new Error('Drive read failed');
+          throw new Error("Drive read failed");
         }
         const raw = docs.get(uri);
         if (raw === undefined) {
@@ -180,18 +252,22 @@ function installDriveMock(
       docs.set(uri, contents);
     },
     async listOrgFilesRecursively() {
+      listings += 1;
       return {
         entries: [
           ...[...docs.keys()].map((uri) => ({
             uri,
-            name: uri.slice(uri.lastIndexOf('/') + 1),
+            name: uri.slice(uri.lastIndexOf("/") + 1),
           })),
-          { uri: driveUri('.#drive-lock.org'), name: '.#drive-lock.org' },
-          { uri: driveUri('#autosave.org#'), name: '#autosave.org#' },
-          { uri: driveUri('notes.org~'), name: 'notes.org~' },
-          { uri: driveUri('agenda.bak'), name: 'agenda.bak' },
-          { uri: driveUri('undo-tree-history.org'), name: 'undo-tree-history.org' },
-          { uri: driveUri('image.png'), name: 'image.png' },
+          { uri: driveUri(".#drive-lock.org"), name: ".#drive-lock.org" },
+          { uri: driveUri("#autosave.org#"), name: "#autosave.org#" },
+          { uri: driveUri("notes.org~"), name: "notes.org~" },
+          { uri: driveUri("agenda.bak"), name: "agenda.bak" },
+          {
+            uri: driveUri("undo-tree-history.org"),
+            name: "undo-tree-history.org",
+          },
+          { uri: driveUri("image.png"), name: "image.png" },
         ],
         errors: [],
       };
@@ -201,9 +277,17 @@ function installDriveMock(
     docs,
     writes,
     maxActiveReads: () => maxReads,
+    listCalls: () => listings,
   };
 }
 
 function driveUri(name: string): string {
   return `content://com.google.android.apps.docs.storage/document/${name}`;
+}
+
+function localDateString(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }

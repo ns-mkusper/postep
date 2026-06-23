@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Modal,
@@ -90,6 +90,13 @@ type SourceTokenKind =
 type SourceToken = {
   text: string;
   kind: SourceTokenKind;
+};
+
+type RenderedInlineTokenKind = "plain" | "link" | "bold" | "italic" | "code";
+
+type RenderedInlineToken = {
+  text: string;
+  kind: RenderedInlineTokenKind;
 };
 
 type NoteMetadata = {
@@ -255,7 +262,6 @@ function GraphicalActionIcon({
 }
 
 const PREVIEW_LOAD_CONCURRENCY = 4;
-const PREVIEW_LOAD_LIMIT = 24;
 const PREVIEW_LOAD_TIMEOUT_MS = 5000;
 const ANDROID_STATUS_BAR_FALLBACK = 58;
 
@@ -321,6 +327,9 @@ async function loadPreviewOrSkip(
       PREVIEW_LOAD_TIMEOUT_MS,
       doc.name,
     );
+    if (!payload.raw.trim()) {
+      return null;
+    }
     return buildPreview(doc, payload);
   } catch (error) {
     console.warn("Postep preview load skipped", {
@@ -333,7 +342,15 @@ async function loadPreviewOrSkip(
 }
 
 function cleanOrgText(text: string) {
-  return text
+  let normalized = text.trim();
+  const heading = normalized.match(/^\s*\*+\s+(.*)$/);
+  if (heading) {
+    normalized = heading[1]
+      .replace(/\s+:([^\s]+):$/g, "")
+      .replace(/^([A-Z][A-Z_-]*)\s+/, "")
+      .replace(/^\[#([A-Z0-9])\]\s+/, "");
+  }
+  return normalized
     .replace(/\[\[([^\]]+)\]\[([^\]]+)\]\]/g, "$2")
     .replace(/\[\[([^\]]+)\]\]/g, "$1")
     .replace(/\s+/g, " ")
@@ -353,6 +370,32 @@ function splitOrgInlineSyntax(text: string): SourceToken[] {
       text: match[0],
       kind: match[1] ? "link" : match[2] === "=" || match[2] === "~" ? "code" : "plain",
     });
+    offset = pattern.lastIndex;
+  }
+  if (offset < text.length) {
+    tokens.push({ text: text.slice(offset), kind: "plain" });
+  }
+  return tokens.length > 0 ? tokens : [{ text, kind: "plain" }];
+}
+
+function splitRenderedInlineSyntax(text: string): RenderedInlineToken[] {
+  const tokens: RenderedInlineToken[] = [];
+  const pattern = /\[\[[^\]]+\]\[([^\]]*)\]\]|\[\[([^\]]+)\]\]|([*_~=])([^\s].*?[^\s]|[^\s])\3/g;
+  let offset = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    if (match.index > offset) {
+      tokens.push({ text: text.slice(offset, match.index), kind: "plain" });
+    }
+    if (match[1] || match[2]) {
+      tokens.push({ text: match[1] ?? match[2], kind: "link" });
+    } else {
+      const marker = match[3];
+      tokens.push({
+        text: match[4],
+        kind: marker === "*" ? "bold" : marker === "/" ? "italic" : "code",
+      });
+    }
     offset = pattern.lastIndex;
   }
   if (offset < text.length) {
@@ -586,20 +629,6 @@ function buildPreview(doc: DocumentRef, payload: DocumentPayload): NotePreview {
       metadata.scheduled?.slice(0, 10) ??
       metadata.deadline?.slice(0, 10) ??
       null,
-  };
-}
-
-function buildFallbackPreview(doc: DocumentRef): NotePreview {
-  return {
-    doc,
-    title: doc.name.replace(/\.org$/i, ""),
-    lines: [],
-    checkedCount: 0,
-    tags: [],
-    metadata: {
-      properties: [],
-    },
-    primaryDate: null,
   };
 }
 
@@ -900,6 +929,28 @@ export default function LibraryScreen() {
   const hasConfiguredRoots =
     bridgeConfig.roots.length > 0 || (bridgeConfig.roamRoots?.length ?? 0) > 0;
 
+  const closeNote = useCallback(() => {
+    setSelectedDocumentKey(null);
+    setSelectedDocumentLine(null);
+    setActiveDocumentDialog(null);
+    setIsEditingDocument(false);
+    setDocumentDraftRaw("");
+    setEditingBlockId(null);
+    setDraftRaw("");
+    setSelectedPath(null);
+  }, []);
+
+  const openNote = useCallback((path: string) => {
+    setSelectedDocumentKey(null);
+    setSelectedDocumentLine(null);
+    setActiveDocumentDialog(null);
+    setIsEditingDocument(false);
+    setDocumentDraftRaw("");
+    setEditingBlockId(null);
+    setDraftRaw("");
+    setSelectedPath(path);
+  }, []);
+
   const documentsQuery = useQuery({
     queryKey: [
       "documents",
@@ -923,7 +974,7 @@ export default function LibraryScreen() {
       documentsQuery.data.map((doc) => doc.path),
     );
     if (resolved) {
-      setSelectedPath(resolved);
+      openNote(resolved);
       setSearchQuery("");
     } else {
       console.warn("Postep open request did not match any document", {
@@ -931,7 +982,7 @@ export default function LibraryScreen() {
       });
     }
     router.setParams({ path: "" });
-  }, [params.path, documentsQuery.data]);
+  }, [params.path, documentsQuery.data, openNote]);
 
   useEffect(() => {
     if (documentsQuery.data && selectedPath) {
@@ -939,10 +990,10 @@ export default function LibraryScreen() {
         (doc) => doc.path === selectedPath,
       );
       if (!stillExists) {
-        setSelectedPath(null);
+        closeNote();
       }
     }
-  }, [documentsQuery.data, selectedPath]);
+  }, [closeNote, documentsQuery.data, selectedPath]);
 
   useEffect(() => {
     setSelectedDocumentKey(null);
@@ -962,7 +1013,7 @@ export default function LibraryScreen() {
     enabled: Boolean(documentsQuery.data) && hasConfiguredRoots,
     queryFn: () =>
       measureAsyncInteraction("noteGrid", async () => {
-        const documents = (documentsQuery.data ?? []).slice(0, PREVIEW_LOAD_LIMIT);
+        const documents = documentsQuery.data ?? [];
         const previews = await mapConcurrent(
           documents,
           PREVIEW_LOAD_CONCURRENCY,
@@ -978,25 +1029,12 @@ export default function LibraryScreen() {
       }),
   });
 
-  const previewByPath = useMemo(
-    () =>
-      new Map(
-        (previewsQuery.data?.value ?? []).map((preview) => [
-          preview.doc.path,
-          preview,
-        ]),
-      ),
-    [previewsQuery.data?.value],
-  );
-
   const noteGrid = useMemo(
     () => ({
-      value: (documentsQuery.data ?? []).map(
-        (doc) => previewByPath.get(doc.path) ?? buildFallbackPreview(doc),
-      ),
+      value: previewsQuery.data?.value ?? [],
       metric: previewsQuery.data?.metric ?? { elapsedMs: 0 },
     }),
-    [documentsQuery.data, previewByPath, previewsQuery.data?.metric],
+    [previewsQuery.data?.metric, previewsQuery.data?.value],
   );
 
   const visibleNotes = useMemo(() => {
@@ -1360,7 +1398,7 @@ export default function LibraryScreen() {
     <View style={styles.listEditorScreen}>
       <View style={styles.listEditorTopBar}>
         <TouchableOpacity
-          onPress={() => setSelectedPath(null)}
+          onPress={closeNote}
           style={styles.iconButton}
           testID="back-to-notes"
         >
@@ -1445,7 +1483,6 @@ export default function LibraryScreen() {
     </View>
   );
 
-  const openNote = (path: string) => setSelectedPath(path);
 
   const sourceTokenStyle = (
     kind: SourceTokenKind,
@@ -1475,13 +1512,25 @@ export default function LibraryScreen() {
     return { color: palette.text };
   };
 
-  const renderSourceTokens = (
-    text: string,
-    keyPrefix: string,
-    palette = { text: "#E6EADF", muted: "#9AA193" },
-  ) =>
-    splitOrgInlineSyntax(text).map((token, tokenIndex) => (
-      <Text key={`${keyPrefix}:${tokenIndex}`} style={sourceTokenStyle(token.kind, palette)}>
+  const renderedInlineStyle = (kind: RenderedInlineTokenKind) => {
+    if (kind === "link") {
+      return styles.previewInlineLink;
+    }
+    if (kind === "bold") {
+      return styles.previewInlineBold;
+    }
+    if (kind === "italic") {
+      return styles.previewInlineItalic;
+    }
+    if (kind === "code") {
+      return styles.previewInlineCode;
+    }
+    return null;
+  };
+
+  const renderRenderedInlineTokens = (text: string, keyPrefix: string) =>
+    splitRenderedInlineSyntax(text).map((token, tokenIndex) => (
+      <Text key={`${keyPrefix}:${tokenIndex}`} style={renderedInlineStyle(token.kind)}>
         {token.text}
       </Text>
     ));
@@ -1551,7 +1600,7 @@ export default function LibraryScreen() {
                 line.checked && styles.previewCheckedText,
               ]}
             >
-              {renderSourceTokens(line.text, `preview-list-${item.doc.name}-${index}`)}
+              {renderRenderedInlineTokens(line.text, `preview-list-${item.doc.name}-${index}`)}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1592,7 +1641,7 @@ export default function LibraryScreen() {
               line.kind === "heading" && styles.previewHeadingText,
             ]}
           >
-            {renderSourceTokens(line.text, `preview-${item.doc.name}-${index}`)}
+            {renderRenderedInlineTokens(line.text, `preview-${item.doc.name}-${index}`)}
           </Text>
         </View>
       </TouchableOpacity>
@@ -2008,7 +2057,7 @@ export default function LibraryScreen() {
             onChangeText={(text) => {
               setSearchQuery(text);
               if (selectedPath) {
-                setSelectedPath(null);
+                closeNote();
               }
             }}
             returnKeyType="search"
@@ -2106,7 +2155,7 @@ export default function LibraryScreen() {
             testID="document-top-bar"
           >
             <TouchableOpacity
-              onPress={() => setSelectedPath(null)}
+              onPress={closeNote}
               style={styles.iconButton}
               testID="back-to-notes"
             >
@@ -2552,7 +2601,7 @@ const styles = StyleSheet.create({
   gridMetaDetails: { alignItems: "flex-end", gap: 2 },
   noteCountText: { color: "#9BA394", fontSize: 15, fontWeight: "700" },
   latencyText: { color: "#747B6F", fontSize: 11 },
-  noteGrid: { paddingHorizontal: 10, paddingBottom: 118, paddingTop: 2 },
+  noteGrid: { paddingHorizontal: 8, paddingBottom: 96, paddingTop: 2 },
   loadingSourceBanner: {
     marginHorizontal: 6,
     marginBottom: 10,
@@ -2567,127 +2616,135 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   loadingSourceText: { color: "#DDE5D4", fontSize: 15, fontWeight: "700" },
-  columnWrapper: { gap: 10, alignItems: "flex-start" },
+  columnWrapper: { gap: 6, alignItems: "flex-start" },
   noteCard: {
     flex: 1,
     backgroundColor: "#091108",
-    borderRadius: 18,
-    borderWidth: 1.5,
+    borderRadius: 12,
+    borderWidth: 1,
     borderColor: "#3D4638",
-    paddingHorizontal: 14,
-    paddingTop: 16,
-    paddingBottom: 16,
-    marginBottom: 10,
-    minHeight: 150,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 8,
+    marginBottom: 6,
+    minHeight: 82,
   },
   noteTitle: {
     color: "#F2F5EC",
-    fontSize: 27,
-    lineHeight: 33,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: "800",
-    marginBottom: 10,
+    marginBottom: 5,
   },
   metadataRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 6,
-    marginBottom: 10,
+    gap: 4,
+    marginBottom: 5,
     alignItems: "center",
   },
   todoChip: {
     color: "#F1F5E8",
     backgroundColor: "#394A23",
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 10,
-    fontSize: 11,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 7,
+    fontSize: 9,
     fontWeight: "900",
     overflow: "hidden",
   },
   priorityChip: {
     color: "#F8D98A",
     backgroundColor: "#352C17",
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 10,
-    fontSize: 11,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 7,
+    fontSize: 9,
     fontWeight: "800",
     overflow: "hidden",
   },
   habitChip: {
     color: "#CDE8B4",
     backgroundColor: "#24371B",
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 10,
-    fontSize: 11,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 7,
+    fontSize: 9,
     fontWeight: "800",
     overflow: "hidden",
   },
   metaChip: {
     color: "#C9D1C0",
     backgroundColor: "#1E271B",
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 10,
-    fontSize: 11,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 7,
+    fontSize: 9,
     overflow: "hidden",
   },
   deadlineChip: {
     color: "#F0C0B0",
     backgroundColor: "#352019",
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 10,
-    fontSize: 11,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 7,
+    fontSize: 9,
     fontWeight: "800",
     overflow: "hidden",
   },
-  previewLines: { gap: 8 },
-  previewLine: { flexDirection: "row", alignItems: "flex-start", gap: 9 },
-  previewHeadingLine: { marginTop: 8 },
+  previewLines: { gap: 3 },
+  previewLine: { flexDirection: "row", alignItems: "flex-start", gap: 5 },
+  previewHeadingLine: { marginTop: 4 },
   previewMetadataInline: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 6,
-    marginBottom: 4,
+    gap: 4,
+    marginBottom: 3,
   },
   previewTextButton: { flex: 1 },
   checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 3,
-    borderWidth: 2.2,
+    width: 12,
+    height: 12,
+    borderRadius: 2,
+    borderWidth: 1.2,
     borderColor: "#929A8C",
-    marginTop: 4,
+    marginTop: 2,
   },
   previewBullet: {
-    width: 20,
-    height: 20,
-    marginTop: 4,
+    width: 12,
+    height: 12,
+    marginTop: 1,
     alignItems: "center",
     justifyContent: "center",
   },
-  previewHeadingSpacer: { width: 20, height: 20, marginTop: 4 },
+  previewHeadingSpacer: { width: 12, height: 12, marginTop: 1 },
   checkboxChecked: { backgroundColor: "#8E987E", borderColor: "#8E987E" },
-  previewText: { flex: 1, color: "#E6EADF", fontSize: 22, lineHeight: 29 },
+  previewText: { flex: 1, color: "#E6EADF", fontSize: 11, lineHeight: 14 },
   previewHeadingText: { fontWeight: "700", color: "#F1F5EB" },
   previewCheckedText: { color: "#858C7F", textDecorationLine: "line-through" },
+  previewInlineLink: { color: "#AFC0FF", fontWeight: "700" },
+  previewInlineBold: { fontWeight: "800" },
+  previewInlineItalic: { fontStyle: "italic" },
+  previewInlineCode: {
+    color: "#C5F0BA",
+    backgroundColor: "rgba(197, 240, 186, 0.12)",
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+  },
   checkedSummary: {
     color: "#9AA193",
-    fontSize: 18,
-    lineHeight: 24,
-    marginTop: 16,
-    marginLeft: 29,
+    fontSize: 10,
+    lineHeight: 13,
+    marginTop: 6,
+    marginLeft: 17,
   },
-  tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 14 },
+  tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 7 },
   tagChip: {
     color: "#CDD5C5",
     backgroundColor: "#20291D",
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 10,
-    fontSize: 11,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 7,
+    fontSize: 9,
     overflow: "hidden",
   },
   emptyDocs: {
