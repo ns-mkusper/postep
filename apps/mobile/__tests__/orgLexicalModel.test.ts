@@ -238,6 +238,47 @@ Body with [[id:alpha][Alpha link]] and /italic/ text.
     assert.equal(listItem.lineEnd, 3);
   });
 
+  it('strips inline org syntax only when reader mode is on', () => {
+    const raw = `#+TITLE: Rich sample
+* TODO [#A] Morning *habit* :habit:daily:
+Body with [[id:alpha][Alpha link]] and /italic/ text.
+- [ ] =coded= task`;
+
+    const readerDocument = createOrgLexicalDocument([], raw, { outlineOnly: false, readerMode: true });
+    const sourceDocument = createOrgLexicalDocument([], raw, { outlineOnly: false, readerMode: false });
+
+    const readerHeading = readerDocument.projection.find((node) => node.type === 'heading');
+    const sourceHeading = sourceDocument.projection.find((node) => node.type === 'heading');
+    assert.ok(readerHeading);
+    assert.ok(sourceHeading);
+    assert.equal(readerHeading.type, 'heading');
+    assert.equal(sourceHeading.type, 'heading');
+    assert.equal(readerHeading.children[0].text, 'Morning habit');
+    assert.equal(sourceHeading.children[0].text, 'Morning *habit*');
+
+    const readerParagraph = readerDocument.projection.find(
+      (node) => node.type === 'paragraph' && node.children[0].text.includes('Alpha link')
+    );
+    const sourceParagraph = sourceDocument.projection.find(
+      (node) => node.type === 'paragraph' && node.children[0].text.includes('Alpha link')
+    );
+    assert.ok(readerParagraph);
+    assert.ok(sourceParagraph);
+    assert.equal(readerParagraph.type, 'paragraph');
+    assert.equal(sourceParagraph.type, 'paragraph');
+    assert.equal(readerParagraph.children[0].text, 'Body with Alpha link and italic text.');
+    assert.equal(sourceParagraph.children[0].text, 'Body with [[id:alpha][Alpha link]] and /italic/ text.');
+
+    const readerListItem = readerDocument.projection.find((node) => node.type === 'list_item');
+    const sourceListItem = sourceDocument.projection.find((node) => node.type === 'list_item');
+    assert.ok(readerListItem);
+    assert.ok(sourceListItem);
+    assert.equal(readerListItem.type, 'list_item');
+    assert.equal(sourceListItem.type, 'list_item');
+    assert.equal(readerListItem.children[0].text, 'coded task');
+    assert.equal(sourceListItem.children[0].text, '=coded= task');
+  });
+
   it('prefers raw heading syntax for metadata while preserving inline render syntax', () => {
     const nodes: LexicalNode[] = [
       {

@@ -310,9 +310,7 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
   await screenshot(page, '09-note-opened-from-roam');
 
   await page.getByTestId('back-to-notes').click();
-  await expect(page.getByTestId('document-chip-list')).toBeVisible();
-  await expect(
-    page.getByTestId('documents-screen').getByText('10 notes')
-  ).toBeVisible();
-  await screenshot(page, '10-back-to-grid-after-roam');
+  await expect(page.getByTestId('roam-backlinks-mode')).toBeVisible();
+  await expect(page.getByTestId('roam-selected-note')).toContainText('E2E Org Sample 10');
+  await screenshot(page, '10-back-to-roam-after-note');
 });

@@ -72,6 +72,49 @@ describe("SAF-backed agenda sources", () => {
     );
   });
 
+  it("dedupes the same SAF document reached through nested folder grants", async () => {
+    let listings = 0;
+    const parentRoot =
+      "content://com.google.android.apps.docs.storage/tree/local-org";
+    const roamRoot = "content://com.google.android.apps.docs.storage/tree/roam";
+    const sharedDocumentId = encodeURIComponent("account=me;doc=shared-1");
+
+    globalThis.__postepContentUri = {
+      async readAsString() {
+        return "";
+      },
+      async writeAsString() {},
+      async listOrgFilesRecursively(uri: string) {
+        listings += 1;
+        const treeId = uri.slice(uri.lastIndexOf("/") + 1);
+        return {
+          entries: [
+            {
+              uri: `${uri}/document/${sharedDocumentId}`,
+              name: "shared-note.org",
+            },
+            {
+              uri: `${uri}/document/${encodeURIComponent(`account=me;doc=${treeId}-only`)}`,
+              name: `${treeId}-only.org`,
+            },
+          ],
+          errors: [],
+        };
+      },
+    };
+
+    const documents = await listDocumentsForConfig({
+      roots: [parentRoot],
+      roamRoots: [roamRoot],
+    });
+
+    assert.equal(listings, 2);
+    assert.deepEqual(
+      documents.map((doc) => doc.name),
+      ["local-org-only.org", "roam-only.org", "shared-note.org"],
+    );
+  });
+
   it("loads a non-empty agenda from Google Drive content URIs inside the refresh goal", async () => {
     const { maxActiveReads } = installDriveMock(makeDriveDocs(48), {
       readDelayMs: 8,
@@ -83,16 +126,19 @@ describe("SAF-backed agenda sources", () => {
 
     assert.equal(snapshot.items.length, 160);
     assert.equal(snapshot.habits.length, 16);
-    assert.ok(snapshot.items.some((item) => item.title === "Drive task 1"));
+    const today = localDateString();
+    const driveTask = snapshot.items.find((item) => item.title === "Drive task 1");
+    const driveHabitItem = snapshot.items.find((item) => item.title === "Drive habit 3");
+    const driveHabit = snapshot.habits.find((item) => item.title.includes("Drive habit 3"));
+    assert.ok(driveTask);
+    assert.equal(driveTask.date, today);
     assert.ok(snapshot.items.some((item) => item.kind === "Floating"));
-    assert.ok(
-      snapshot.items.some(
-        (item) =>
-          item.title === "Drive habit 3" &&
-          item.repeater?.amount === 1 &&
-          item.repeater.unit === "Week",
-      ),
-    );
+    assert.ok(driveHabitItem);
+    assert.equal(driveHabitItem.date, today);
+    assert.equal(driveHabitItem.repeater?.amount, 1);
+    assert.equal(driveHabitItem.repeater.unit, "Week");
+    assert.ok(driveHabit);
+    assert.equal(driveHabit.scheduled, today);
     assert.ok(
       maxActiveReads() <= 12,
       `read concurrency reached ${maxActiveReads()}`,
@@ -161,8 +207,13 @@ describe("SAF-backed agenda sources", () => {
     const raw = docs.get(driveUri("drive-03.org")) ?? "";
     const today = localDateString();
 
+    const expectedNext = nextWeeklyDateAfter("2026-06-04", today);
+
     assert.equal(writes.length, 1);
-    assert.match(raw, /SCHEDULED: <2026-06-11 Tue 07:30 \+\+1w>/);
+    assert.match(
+      raw,
+      new RegExp(`SCHEDULED: <${expectedNext} ${weekdayName(expectedNext)} 07:30 \\+\\+1w>`),
+    );
     assert.ok(raw.includes(`:LAST_REPEAT: [${today} `));
     assert.ok(raw.includes(`State "DONE" from "TODO" [${today} `));
     assert.ok(
@@ -290,4 +341,24 @@ function localDateString(date = new Date()): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function nextWeeklyDateAfter(start: string, today: string): string {
+  let next = addDays(start, 7);
+  while (next <= today) {
+    next = addDays(next, 7);
+  }
+  return next;
+}
+
+function addDays(date: string, days: number): string {
+  const next = new Date(`${date}T12:00:00`);
+  next.setDate(next.getDate() + days);
+  return localDateString(next);
+}
+
+function weekdayName(date: string): string {
+  return new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(
+    new Date(`${date}T12:00:00`),
+  );
 }
