@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 
+import { QueryClient } from "@tanstack/react-query";
 import type { OrgBridgeConfig } from "@postep/bridge";
 import { loadAgendaSnapshotForConfig } from "../lib/agendaSources";
 import {
@@ -14,6 +15,11 @@ import {
   resetDocumentSourceStats,
 } from "../lib/documentSources";
 import { loadRoamGraphForConfig } from "../lib/roamSources";
+import {
+  clearWarmOrgCache,
+  hydrateWarmOrgCache,
+  refreshWarmOrgWorkspace,
+} from "../lib/orgWarmCache";
 
 declare const globalThis: typeof global & {
   __postepContentUri?: {
@@ -28,6 +34,7 @@ declare const globalThis: typeof global & {
     }>;
   };
   performance?: Performance;
+  window?: Window & typeof globalThis;
 };
 
 globalThis.performance = performance as unknown as Performance;
@@ -49,15 +56,20 @@ type RouteMeasurement = {
 };
 type RoutePairMeasurement = RouteMeasurement & { from: RouteName; to: RouteName };
 
-afterEach(() => {
+afterEach(async () => {
   clearDocumentSourceCache();
   resetDocumentSourceStats();
   delete globalThis.__postepContentUri;
+  if (globalThis.window?.localStorage) {
+    await clearWarmOrgCache();
+    delete globalThis.window;
+  }
 });
 
 describe("warm route-switching performance", () => {
   it("serves Agenda, Habits, Roam, Library, and notes from the warm cache without source reads", async () => {
-    installDriveMock(makePerfDocs(72), { readDelayMs: 2 });
+    const documentCount = 72;
+    installDriveMock(makePerfDocs(documentCount), { readDelayMs: 2 });
 
     const routes = routeLoaders();
     const before = [] as RouteMeasurement[];
@@ -93,6 +105,32 @@ describe("warm route-switching performance", () => {
     }
 
     const afterStats = getDocumentSourceStats();
+
+    installLocalStorageMock();
+    const indexedRefreshClient = new QueryClient();
+    const indexedRefresh = await refreshWarmOrgWorkspace(indexedRefreshClient, config);
+    const indexedRevalidation = await refreshWarmOrgWorkspace(indexedRefreshClient, config);
+    clearDocumentSourceCache();
+    resetDocumentSourceStats();
+    const indexedHydrateClient = new QueryClient();
+    const indexedHydrated = await hydrateWarmOrgCache(indexedHydrateClient, config);
+    const indexedAfterRestart = [] as RoutePairMeasurement[];
+    for (const from of routes) {
+      for (const to of routes) {
+        if (from.name === to.name) {
+          continue;
+        }
+        const measurement = await measureRoute(to.name, to.load);
+        indexedAfterRestart.push({ ...measurement, from: from.name, to: to.name });
+      }
+    }
+    const indexedAfterStats = getDocumentSourceStats();
+    const indexedAfterMaxMs = Math.max(...indexedAfterRestart.map((measurement) => measurement.elapsedMs));
+    const indexedAfterMedianMs = percentile(
+      indexedAfterRestart.map((measurement) => measurement.elapsedMs),
+      0.5,
+    );
+
     const maxAfterMs = Math.max(...after.map((measurement) => measurement.elapsedMs));
     const medianAfterMs = percentile(after.map((measurement) => measurement.elapsedMs), 0.5);
     const beforeByRoute = Object.fromEntries(
@@ -113,19 +151,38 @@ describe("warm route-switching performance", () => {
     const artifact = {
       generatedAt: new Date().toISOString(),
       corpus: {
-        documents: 72,
+        documents: documentCount,
         sourceReadDelayMs: 2,
         routes: routes.map((route) => route.name),
       },
       beforeColdSourceBound: before,
       warmup: { elapsedMs: warmElapsedMs, stats: warmStats },
       afterWarmRoutePairs: after,
+      indexedCacheAfterRestart: {
+        refresh: indexedRefresh,
+        revalidation: indexedRevalidation,
+        hydrate: indexedHydrated,
+        routePairs: indexedAfterRestart,
+        stats: indexedAfterStats,
+        medianMs: indexedAfterMedianMs,
+        maxMs: indexedAfterMaxMs,
+      },
       summary: {
         beforeColdSourceReads: before.reduce((total, measurement) => total + measurement.sourceReads, 0),
         afterWarmSourceReads: afterStats.listSourceReads + afterStats.documentSourceReads,
         afterWarmCacheHits: afterStats.listCacheHits + afterStats.documentCacheHits,
         afterWarmMedianMs: medianAfterMs,
         afterWarmMaxMs: maxAfterMs,
+        indexedAfterRestartSourceReads:
+          indexedAfterStats.listSourceReads + indexedAfterStats.documentSourceReads,
+        indexedAfterRestartCacheHits:
+          indexedAfterStats.listCacheHits + indexedAfterStats.documentCacheHits,
+        indexedAfterRestartMedianMs: indexedAfterMedianMs,
+        indexedAfterRestartMaxMs: indexedAfterMaxMs,
+        indexedRefreshChangedDocuments: indexedRefresh.changedDocuments,
+        indexedRefreshUnchangedDocuments: indexedRefresh.unchangedDocuments,
+        indexedRevalidationChangedDocuments: indexedRevalidation.changedDocuments,
+        indexedRevalidationUnchangedDocuments: indexedRevalidation.unchangedDocuments,
         beforeColdMsByRoute: Object.fromEntries(
           Object.entries(beforeByRoute).map(([route, measurement]) => [route, measurement.elapsedMs]),
         ),
@@ -137,9 +194,27 @@ describe("warm route-switching performance", () => {
 
     assert.equal(afterStats.listSourceReads, 0, "warm switches must not relist source roots");
     assert.equal(afterStats.documentSourceReads, 0, "warm switches must not reread source documents");
+    assert.equal(indexedAfterStats.listSourceReads, 0, "indexed restart switches must not relist source roots");
+    assert.equal(indexedAfterStats.documentSourceReads, 0, "indexed restart switches must not reread source documents");
+    assert.ok(indexedHydrated.hydrated, "indexed warm cache should hydrate after restart");
+    assert.ok(indexedRefresh.persistedDocuments > 0, "indexed warm cache should persist document payloads");
+    assert.equal(
+      indexedRevalidation.changedDocuments,
+      0,
+      "indexed warm cache revalidation should not rewrite unchanged documents",
+    );
+    assert.equal(
+      indexedRevalidation.unchangedDocuments,
+      documentCount,
+      "indexed warm cache revalidation should count unchanged documents",
+    );
     assert.ok(afterStats.listCacheHits > 0, "warm switches should hit the document-list cache");
     assert.ok(afterStats.documentCacheHits > 0, "warm switches should hit the document payload cache");
     assert.ok(maxAfterMs < 75, `warm route switch max ${maxAfterMs.toFixed(2)}ms exceeded 75ms`);
+    assert.ok(
+      indexedAfterMaxMs < 75,
+      `indexed restart route switch max ${indexedAfterMaxMs.toFixed(2)}ms exceeded 75ms`,
+    );
   });
 });
 
@@ -276,6 +351,31 @@ function installDriveMock(
       };
     },
   };
+}
+
+function installLocalStorageMock(): void {
+  const store = new Map<string, string>();
+  const localStorage = {
+    get length() {
+      return store.size;
+    },
+    key(index: number) {
+      return [...store.keys()][index] ?? null;
+    },
+    getItem(key: string) {
+      return store.get(key) ?? null;
+    },
+    setItem(key: string, value: string) {
+      store.set(key, value);
+    },
+    removeItem(key: string) {
+      store.delete(key);
+    },
+    clear() {
+      store.clear();
+    },
+  };
+  globalThis.window = { localStorage } as Window & typeof globalThis;
 }
 
 function driveUri(name: string): string {
