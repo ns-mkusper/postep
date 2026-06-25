@@ -154,7 +154,12 @@ export async function completeHabitForConfig(
   previousSnapshot?: AgendaSnapshot,
 ): Promise<AgendaSnapshot> {
   if (!isSafUri(item.path)) {
-    return setAgendaStatusForConfig(config, item, "DONE", previousSnapshot);
+    return setAgendaStatusForConfig(
+      config,
+      item,
+      item.todo_keyword === "DONE" ? "TODO" : "DONE",
+      previousSnapshot,
+    );
   }
 
   const payload = await loadDocumentForConfig(config, item.path);
@@ -450,6 +455,18 @@ function completeHabitRaw(lines: string[], item: AgendaItem): string {
     return lines.join("\n");
   }
 
+  const currentlyDone =
+    headingStatus(heading) === "DONE" ||
+    hasLastRepeatDate(lines, item.headline_line, findHeadingEnd(lines, item.headline_line), today);
+
+  if (currentlyDone) {
+    const rangeEnd = findHeadingEnd(lines, item.headline_line);
+    removeLogbookEntriesForDate(lines, item.headline_line, rangeEnd, today);
+    removeLastRepeatForDate(lines, item.headline_line, findHeadingEnd(lines, item.headline_line), today);
+    lines[item.headline_line] = replaceHeadingStatus(heading, "TODO");
+    return lines.join("\n");
+  }
+
   if (!item.repeater || !item.date) {
     lines[item.headline_line] = replaceHeadingStatus(heading, "DONE");
     return lines.join("\n");
@@ -474,8 +491,61 @@ function completeHabitRaw(lines: string[], item: AgendaItem): string {
     findHeadingEnd(lines, item.headline_line),
     today,
   );
-  lines[item.headline_line] = replaceHeadingStatus(heading, "TODO");
+  lines[item.headline_line] = replaceHeadingStatus(heading, "DONE");
   return lines.join("\n");
+}
+
+function headingStatus(line: string): string | null {
+  return line.match(/^\*+\s+([A-Z][A-Z_-]*)(?:\s|$)/)?.[1] ?? null;
+}
+
+function hasLastRepeatDate(
+  lines: string[],
+  headlineLine: number,
+  rangeEnd: number,
+  date: string,
+): boolean {
+  for (let index = headlineLine + 1; index < rangeEnd; index += 1) {
+    if (
+      /^\s*:LAST_REPEAT:/i.test(lines[index]) &&
+      lines[index].includes(`[${date} `)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function removeLastRepeatForDate(
+  lines: string[],
+  headlineLine: number,
+  rangeEnd: number,
+  date: string,
+): void {
+  for (let index = rangeEnd - 1; index > headlineLine; index -= 1) {
+    if (
+      /^\s*:LAST_REPEAT:/i.test(lines[index]) &&
+      lines[index].includes(`[${date} `)
+    ) {
+      lines.splice(index, 1);
+    }
+  }
+}
+
+function removeLogbookEntriesForDate(
+  lines: string[],
+  headlineLine: number,
+  rangeEnd: number,
+  date: string,
+): void {
+  for (let index = rangeEnd - 1; index > headlineLine; index -= 1) {
+    if (
+      /State "DONE" from "/.test(lines[index]) &&
+      lines[index].includes(`[${date} `)
+    ) {
+      lines.splice(index, 1);
+    }
+  }
 }
 
 function findHeadingEnd(lines: string[], headlineLine: number): number {

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it, afterEach } from "node:test";
 import { performance } from "node:perf_hooks";
 
-import { listDocumentsForConfig } from "../lib/documentSources";
+import {
+  clearDocumentSourceCache,
+  listDocumentsForConfig,
+  resetDocumentSourceStats,
+} from "../lib/documentSources";
 import {
   completeHabitForConfig,
   loadAgendaSnapshotForConfig,
@@ -31,6 +35,8 @@ const rootUri = "content://com.google.android.apps.docs.storage/document/root";
 const config: OrgBridgeConfig = { roots: [rootUri], roamRoots: [] };
 
 afterEach(() => {
+  clearDocumentSourceCache();
+  resetDocumentSourceStats();
   delete globalThis.__postepContentUri;
 });
 
@@ -210,6 +216,7 @@ describe("SAF-backed agenda sources", () => {
     const expectedNext = nextWeeklyDateAfter("2026-06-04", today);
 
     assert.equal(writes.length, 1);
+    assert.match(raw, /^\* DONE Drive habit 3/m);
     assert.match(
       raw,
       new RegExp(`SCHEDULED: <${expectedNext} ${weekdayName(expectedNext)} 07:30 \\+\\+1w>`),
@@ -225,6 +232,69 @@ describe("SAF-backed agenda sources", () => {
       ),
     );
   });
+
+  it("toggles already-DONE SAF habits back to TODO without relying on LAST_REPEAT", async () => {
+    const docs = makeDriveDocs(3);
+    docs.set(
+      driveUri("drive-03.org"),
+      (docs.get(driveUri("drive-03.org")) ?? "").replace(
+        "* TODO Drive habit 3",
+        "* DONE Drive habit 3",
+      ),
+    );
+    const { writes } = installDriveMock(docs);
+    const initial = await loadAgendaSnapshotForConfig(config);
+    const habit = initial.habits.find((candidate) =>
+      candidate.title.includes("Drive habit 3"),
+    );
+    assert.ok(habit);
+    const item = initial.items.find(
+      (candidate) =>
+        candidate.path === habit.path &&
+        candidate.headline_line === habit.headline_line,
+    );
+    assert.ok(item);
+    assert.equal(item.todo_keyword, "DONE");
+
+    await completeHabitForConfig(config, item, initial);
+    const raw = docs.get(driveUri("drive-03.org")) ?? "";
+
+    assert.equal(writes.length, 1);
+    assert.match(raw, /^\* TODO Drive habit 3/m);
+  });
+
+  it("toggles completed SAF habits back to TODO and removes today's repeat metadata", async () => {
+    const { docs, writes } = installDriveMock(makeDriveDocs(3));
+    const initial = await loadAgendaSnapshotForConfig(config);
+    const habit = initial.habits.find((candidate) =>
+      candidate.title.includes("Drive habit 3"),
+    );
+    assert.ok(habit);
+    const item = initial.items.find(
+      (candidate) =>
+        candidate.path === habit.path &&
+        candidate.headline_line === habit.headline_line,
+    );
+    assert.ok(item);
+
+    const completed = await completeHabitForConfig(config, item, initial);
+    const completedItem = completed.items.find(
+      (candidate) =>
+        candidate.path === habit.path &&
+        candidate.headline_line === habit.headline_line,
+    );
+    assert.ok(completedItem);
+
+    await completeHabitForConfig(config, completedItem, completed);
+    const raw = docs.get(driveUri("drive-03.org")) ?? "";
+    const today = localDateString();
+
+    assert.equal(writes.length, 2);
+    assert.match(raw, /^\* TODO Drive habit 3/m);
+    assert.ok(!raw.includes(`:LAST_REPEAT: [${today} `));
+    assert.ok(!raw.includes(`State "DONE" from "TODO" [${today} `));
+  });
+
 });
 
 function makeDriveDocs(count: number): Map<string, string> {

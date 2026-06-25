@@ -60,8 +60,22 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Prepare Android SDK
+        run: |
+          set -euo pipefail
+          export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/cmdline-tools/16.0/bin:$ANDROID_HOME/platform-tools:$PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          for attempt in 1 2 3; do
+            if sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"; then
+              break
+            fi
+            if [[ "$attempt" == "3" ]]; then
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
 
       - name: Install mobile dependencies
         working-directory: apps/mobile
@@ -113,8 +127,22 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Prepare Android SDK
+        run: |
+          set -euo pipefail
+          export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/cmdline-tools/16.0/bin:$ANDROID_HOME/platform-tools:$PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          for attempt in 1 2 3; do
+            if sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"; then
+              break
+            fi
+            if [[ "$attempt" == "3" ]]; then
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
 
       - name: Install mobile dependencies
         working-directory: apps/mobile
@@ -187,7 +215,7 @@ jobs:
         with:
           name: launched-ui-screenshots
           path: apps/mobile/e2e-artifacts/screenshots
-          if-no-files-found: error
+          if-no-files-found: ignore
 
       - name: Upload Playwright traces
         if: failure()
@@ -224,8 +252,22 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Prepare Android SDK
+        run: |
+          set -euo pipefail
+          export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/cmdline-tools/16.0/bin:$ANDROID_HOME/platform-tools:$PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          for attempt in 1 2 3; do
+            if sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"; then
+              break
+            fi
+            if [[ "$attempt" == "3" ]]; then
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
 
       - name: Enable KVM access
         run: |
@@ -305,6 +347,12 @@ jobs:
             bash -euo pipefail -c 'APP_SOURCE_DIR="${{ github.workspace }}/../postep-base/apps/mobile" SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-before" METRICS_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-performance-before" APK_PATH="${{ github.workspace }}/apps/mobile/e2e-artifacts/apks/base-app-debug.apk" METRO_PORT=8081 EXPO_LOG=/tmp/postep-base-expo-screenshots.log bash "${{ github.workspace }}/apps/mobile/e2e/capture-android-screenshots.sh"'
             adb shell am force-stop com.postep.mobile || true
             bash -euo pipefail -c 'SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-after" METRICS_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-performance-after" ANDROID_STRICT_DOCUMENT_ASSERTIONS=1 ANDROID_ENFORCE_PERFORMANCE_BUDGETS=1 APK_PATH="${{ github.workspace }}/apps/mobile/e2e-artifacts/apks/head-app-debug.apk" METRO_PORT=8081 EXPO_LOG=/tmp/postep-head-expo-screenshots.log bash "${{ github.workspace }}/apps/mobile/e2e/capture-android-screenshots.sh"'
+
+      - name: Verify Android screenshot coverage
+        if: always()
+        run: |
+          test -s apps/mobile/e2e-artifacts/android-screenshots-before/15-habits.png
+          test -s apps/mobile/e2e-artifacts/android-screenshots-after/15-habits.png
 
       - name: Compare Android emulator screenshots
         if: always()

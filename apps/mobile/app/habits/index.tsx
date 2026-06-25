@@ -5,6 +5,8 @@ import {
   Text,
   StyleSheet,
   FlatList,
+  Modal,
+  Pressable,
   TextInput,
   TouchableOpacity,
 } from "react-native";
@@ -19,6 +21,7 @@ import {
   deleteHabitForConfig,
   loadAgendaSnapshotForConfig,
 } from "../../lib/agendaSources";
+import { clearDocumentSourceCache } from "../../lib/documentSources";
 import { agendaQueryKey, hasConfiguredOrgRoots } from "../../lib/queryKeys";
 
 function bareHabitTitle(title: string) {
@@ -67,8 +70,10 @@ export default function HabitsScreen() {
   const [title, setTitle] = useState("New habit");
   const [scheduled, setScheduled] = useState("2026-05-15 Fri 08:00");
   const [pendingHabitKey, setPendingHabitKey] = useState<string | null>(null);
+  const [menuHabit, setMenuHabit] = useState<Habit | null>(null);
   const hasConfiguredRoots = hasConfiguredOrgRoots(config);
   const agendaKey = agendaQueryKey(config);
+  const cachedAgenda = queryClient.getQueryData<Awaited<ReturnType<typeof loadAgendaSnapshotForConfig>>>(agendaKey);
 
   const agendaQuery = useQuery({
     queryKey: agendaKey,
@@ -77,10 +82,17 @@ export default function HabitsScreen() {
         ? loadAgendaSnapshotForConfig(config)
         : Promise.resolve({ items: [], habits: [] }),
     enabled: hasHydratedConfig,
+    initialData: cachedAgenda,
   });
 
-  useBridgeEvent("agendaChanged", () => agendaQuery.refetch());
-  useBridgeEvent("rootsChanged", () => agendaQuery.refetch());
+  useBridgeEvent("agendaChanged", () => {
+    clearDocumentSourceCache();
+    void agendaQuery.refetch();
+  });
+  useBridgeEvent("rootsChanged", () => {
+    clearDocumentSourceCache();
+    void agendaQuery.refetch();
+  });
 
   const habits = useMemo(
     () => agendaQuery.data?.habits ?? [],
@@ -137,6 +149,7 @@ export default function HabitsScreen() {
         agendaQuery.data,
       );
       queryClient.setQueryData(agendaKey, snapshot);
+      setMenuHabit(null);
     } finally {
       setPendingHabitKey(null);
     }
@@ -190,7 +203,7 @@ export default function HabitsScreen() {
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => {
           const today = localDateString();
-          const doneToday = item.last_repeat === today;
+          const doneToday = item.todo_keyword === "DONE" || item.last_repeat === today;
           const key = habitKey(item);
           const completing = pendingHabitKey === `done:${key}`;
           const deleting = pendingHabitKey === `delete:${key}`;
@@ -200,38 +213,40 @@ export default function HabitsScreen() {
               style={[styles.card, doneToday && styles.cardDoneToday]}
               testID="habit-card"
             >
-              <View style={styles.cardHeader}>
-                <TouchableOpacity
-                  style={styles.titleButton}
-                  activeOpacity={0.75}
-                  onPress={() => openNotePath(item.path)}
-                  disabled={!item.path}
-                  testID={`habit-open-note-${item.title.replace(/\s+/g, "-").toLowerCase()}`}
-                >
-                  <Text style={[styles.title, doneToday && styles.titleDone]}>
-                    {item.title}
+              <View style={styles.cardContent}>
+                <View style={styles.cardHeader}>
+                  <TouchableOpacity
+                    style={styles.titleButton}
+                    activeOpacity={0.75}
+                    onPress={() => openNotePath(item.path)}
+                    disabled={!item.path}
+                    testID={`habit-open-note-${item.title.replace(/\s+/g, "-").toLowerCase()}`}
+                  >
+                    <Text style={[styles.title, doneToday && styles.titleDone]}>
+                      {item.title}
+                    </Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.streak, doneToday && styles.streakDone]}>
+                    {doneToday ? "Done today" : item.last_repeat ?? "—"}
                   </Text>
-                </TouchableOpacity>
-                <Text style={[styles.streak, doneToday && styles.streakDone]}>
-                  {doneToday ? "Done today" : item.last_repeat ?? "—"}
-                </Text>
+                </View>
+                {item.scheduled && (
+                  <Text style={[styles.meta, doneToday && styles.metaDone]}>
+                    Scheduled {item.scheduled}
+                  </Text>
+                )}
+                {item.description ? (
+                  <Text
+                    style={[
+                      styles.description,
+                      doneToday && styles.descriptionDone,
+                    ]}
+                  >
+                    {item.description}
+                  </Text>
+                ) : null}
               </View>
-              {item.scheduled && (
-                <Text style={[styles.meta, doneToday && styles.metaDone]}>
-                  Scheduled {item.scheduled}
-                </Text>
-              )}
-              {item.description ? (
-                <Text
-                  style={[
-                    styles.description,
-                    doneToday && styles.descriptionDone,
-                  ]}
-                >
-                  {item.description}
-                </Text>
-              ) : null}
-              <View style={styles.actionRow}>
+              <View style={styles.habitActionRail}>
                 <TouchableOpacity
                   testID={`habit-done-${item.title.replace(/\s+/g, "-").toLowerCase()}`}
                   style={[
@@ -240,27 +255,24 @@ export default function HabitsScreen() {
                     pending && styles.actionButtonDisabled,
                   ]}
                   onPress={() => handleCompleteHabit(item)}
-                  disabled={doneToday || pending}
+                  disabled={pending}
                 >
                   {completing ? (
                     <ActivityIndicator size="small" color="#F1F5E8" />
                   ) : (
                     <Text style={styles.doneText}>
-                      {doneToday ? "Done" : "Done today"}
+                      {doneToday ? "TODO" : "Done"}
                     </Text>
                   )}
                 </TouchableOpacity>
                 <TouchableOpacity
-                  testID={`habit-delete-${item.title.replace(/\s+/g, "-").toLowerCase()}`}
-                  style={[styles.deleteButton, pending && styles.actionButtonDisabled]}
-                  onPress={() => handleDeleteHabit(item)}
+                  testID={`habit-menu-${item.title.replace(/\s+/g, "-").toLowerCase()}`}
+                  accessibilityLabel="Habit actions"
+                  style={[styles.menuButton, pending && styles.actionButtonDisabled]}
+                  onPress={() => setMenuHabit(item)}
                   disabled={pending}
                 >
-                  {deleting ? (
-                    <ActivityIndicator size="small" color="#F0C0B0" />
-                  ) : (
-                    <Text style={styles.deleteText}>Delete</Text>
-                  )}
+                  <Text style={styles.menuButtonText}>⋯</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -279,6 +291,41 @@ export default function HabitsScreen() {
           </View>
         )}
       />
+
+      <Modal
+        visible={Boolean(menuHabit)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuHabit(null)}
+      >
+        <Pressable style={styles.menuBackdrop} onPress={() => setMenuHabit(null)}>
+          <Pressable style={styles.menuSheet}>
+            <Text style={styles.menuTitle}>{menuHabit?.title ?? "Habit actions"}</Text>
+            <TouchableOpacity
+              testID="habit-menu-delete"
+              style={[
+                styles.deleteButton,
+                menuHabit &&
+                  pendingHabitKey === `delete:${habitKey(menuHabit)}` &&
+                  styles.actionButtonDisabled,
+              ]}
+              onPress={() => menuHabit && handleDeleteHabit(menuHabit)}
+              disabled={
+                !menuHabit || pendingHabitKey === `delete:${habitKey(menuHabit)}`
+              }
+            >
+              {menuHabit && pendingHabitKey === `delete:${habitKey(menuHabit)}` ? (
+                <ActivityIndicator size="small" color="#F0C0B0" />
+              ) : (
+                <Text style={styles.deleteText}>Delete habit</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelButton} onPress={() => setMenuHabit(null)}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -359,21 +406,25 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: "#091108",
-    padding: 8,
     borderRadius: 12,
     marginBottom: 6,
     borderWidth: 1,
     borderColor: "#3D4638",
+    overflow: "hidden",
+    flexDirection: "row",
+    alignItems: "stretch",
   },
   cardDoneToday: {
     borderColor: "#4D5B3B",
     backgroundColor: "#0A0F08",
-    opacity: 0.86,
+    opacity: 0.9,
+  },
+  cardContent: {
+    flex: 1,
+    padding: 10,
   },
   cardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 8,
+    gap: 4,
   },
   titleButton: {
     flex: 1,
@@ -416,22 +467,24 @@ const styles = StyleSheet.create({
   descriptionDone: {
     color: "#828A7D",
   },
-  actionRow: {
+  habitActionRail: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-    marginTop: 6,
+    alignSelf: "stretch",
+    borderLeftWidth: 1,
+    borderLeftColor: "#2E3A2B",
   },
   doneButton: {
     backgroundColor: "#394A23",
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    minHeight: 28,
+    width: 72,
+    alignSelf: "stretch",
+    alignItems: "center",
     justifyContent: "center",
+    paddingHorizontal: 8,
   },
   doneButtonComplete: {
-    backgroundColor: "#54652D",
+    backgroundColor: "#2563EB",
+    borderLeftWidth: 1,
+    borderLeftColor: "#60A5FA",
   },
   actionButtonDisabled: {
     opacity: 0.65,
@@ -439,20 +492,74 @@ const styles = StyleSheet.create({
   doneText: {
     color: "#F1F5E8",
     fontWeight: "900",
-    fontSize: 11,
+    fontSize: 12,
+    letterSpacing: 0.2,
+    textAlign: "center",
+  },
+  menuButton: {
+    width: 38,
+    alignSelf: "stretch",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#111A10",
+    borderLeftWidth: 1,
+    borderLeftColor: "#2E3A2B",
+  },
+  menuButtonText: {
+    color: "#DDE5D4",
+    fontSize: 22,
+    lineHeight: 24,
+    fontWeight: "900",
+  },
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    justifyContent: "flex-end",
+    padding: 16,
+  },
+  menuSheet: {
+    backgroundColor: "#0D160C",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#3D4638",
+    padding: 12,
+    gap: 10,
+  },
+  menuTitle: {
+    color: "#F2F5EC",
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "900",
   },
   deleteButton: {
     backgroundColor: "#352019",
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    minHeight: 28,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    minHeight: 44,
     justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#643526",
   },
   deleteText: {
     color: "#F0C0B0",
+    fontWeight: "900",
+    fontSize: 13,
+  },
+  cancelButton: {
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    minHeight: 44,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#172015",
+  },
+  cancelText: {
+    color: "#DDE5D4",
     fontWeight: "800",
-    fontSize: 11,
+    fontSize: 13,
   },
   empty: {
     flex: 1,

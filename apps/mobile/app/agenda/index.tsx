@@ -20,6 +20,7 @@ import {
   loadAgendaSnapshotForConfig,
   setAgendaStatusForConfig,
 } from "../../lib/agendaSources";
+import { clearDocumentSourceCache } from "../../lib/documentSources";
 import { agendaQueryKey, hasConfiguredOrgRoots } from "../../lib/queryKeys";
 
 const STATUS_OPTIONS: Array<{ label: string; value: string }> = [
@@ -262,6 +263,7 @@ export default function AgendaScreen() {
   const [preserveOrderKeys, setPreserveOrderKeys] = useState<string[] | null>(null);
   const hasConfiguredRoots = hasConfiguredOrgRoots(config);
   const agendaKey = agendaQueryKey(config);
+  const cachedAgenda = queryClient.getQueryData<Awaited<ReturnType<typeof loadAgendaSnapshotForConfig>>>(agendaKey);
 
   const agendaQuery = useQuery({
     queryKey: agendaKey,
@@ -270,9 +272,11 @@ export default function AgendaScreen() {
         ? loadAgendaSnapshotForConfig(config)
         : Promise.resolve({ items: [], habits: [] }),
     enabled: hasHydratedConfig,
+    initialData: cachedAgenda,
   });
 
   const refreshAgenda = useCallback(() => {
+    clearDocumentSourceCache();
     setPreserveOrderKeys(null);
     return agendaQuery.refetch();
   }, [agendaQuery]);

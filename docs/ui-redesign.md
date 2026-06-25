@@ -9,6 +9,13 @@ This document captures the interaction model for Postep’s Lexical-backed front
 - **Transparent sync**: Surface Drive/SAF sync state inline (status bar + per-root badges) so users trust the Google Drive backend.
 - **Native rendering first**: Use Lexical for document/editor semantics while rendering Org projections with React Native primitives for Android reliability and performance.
 
+## UI Style Guide
+
+### Action colors
+- **Completion action**: green (`#394A23`, text `#F1F5E8`) is used for habit `Done` buttons and other positive commit actions.
+- **TODO/reopen action**: blue (`#2563EB`, accent border `#60A5FA`, text `#F1F5E8`) is reserved for controls that turn a completed item back into `TODO`. In the Habits view, the right-rail button must switch to this blue treatment when its label is `TODO`.
+- **Destructive action**: red/brown (`#352019`, border `#643526`, text `#F0C0B0`) is reserved for delete/remove actions and should be placed behind an overflow/confirmation surface rather than exposed on cards.
+
 ## Global Layout
 - **Bottom navigation bar** with five primary destinations: `Library`, `Agenda`, `Habits`, `Roam`, `Capture`. Each section owns a Lexical-backed projection tuned to the task.
 - **Global search FAB** (floating action button) that opens a full-screen Spotlight overlay combining title/body search, filters (tags, TODO state), and quick-jump.

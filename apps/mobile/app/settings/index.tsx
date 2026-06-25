@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -12,9 +12,17 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { useOrgConfig } from "../../store/orgConfig";
-import { dedupeSourceList, normalizeSourceIdentity } from "../../lib/documentSources";
+import { clearDocumentSourceCache, dedupeSourceList, normalizeSourceIdentity } from "../../lib/documentSources";
+import {
+  clearWarmOrgCache,
+  getWarmOrgCacheStatus,
+  refreshWarmOrgWorkspace,
+  type WarmOrgCacheMetrics,
+  type WarmOrgCacheStatus,
+} from "../../lib/orgWarmCache";
 
 const ANDROID_STATUS_BAR_FALLBACK = 58;
 
@@ -45,6 +53,29 @@ function formatListingWarning(errors: Array<{ message: string }>): string {
   return ` · ${errors.length} skipped${first}`;
 }
 
+function formatCacheAge(status: WarmOrgCacheStatus | null): string {
+  if (!status?.exists || !status.lastIndexedAt) {
+    return "Never indexed";
+  }
+  const ageMs = Math.max(0, Date.now() - status.lastIndexedAt);
+  const minutes = Math.floor(ageMs / 60000);
+  if (minutes < 1) {
+    return "Last indexed just now";
+  }
+  if (minutes < 60) {
+    return `Last indexed ${minutes} min ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `Last indexed ${hours} hr ago`;
+  }
+  return `Last indexed ${Math.floor(hours / 24)} days ago`;
+}
+
+function formatCacheMetrics(metrics: WarmOrgCacheMetrics): string {
+  return `${metrics.documents} docs · ${metrics.changedDocuments} changed · ${metrics.unchangedDocuments} unchanged · ${metrics.elapsedMs.toFixed(0)}ms`;
+}
+
 type FileListingSummary = {
   kind: "org" | "roam";
   root: string;
@@ -53,8 +84,14 @@ type FileListingSummary = {
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
   const roots = useOrgConfig((state) => state.roots);
   const roamRoots = useOrgConfig((state) => state.roamRoots);
+  const configKey = useMemo(() => JSON.stringify({ roots, roamRoots }), [roots, roamRoots]);
+  const config = useMemo(() => ({
+    roots,
+    ...(roamRoots.length > 0 ? { roamRoots } : {}),
+  }), [configKey]);
   const addRoot = useOrgConfig((state) => state.addRoot);
   const removeRoot = useOrgConfig((state) => state.removeRoot);
   const addRoamRoot = useOrgConfig((state) => state.addRoamRoot);
@@ -64,8 +101,64 @@ export default function SettingsScreen() {
   const [pickerStatus, setPickerStatus] = useState<string | null>(null);
   const [listingSummaries, setListingSummaries] = useState<FileListingSummary[]>([]);
   const [loadingSource, setLoadingSource] = useState<"org" | "roam" | null>(null);
+  const [cacheStatus, setCacheStatus] = useState<WarmOrgCacheStatus | null>(null);
+  const [cacheAction, setCacheAction] = useState<"refresh" | "clear" | null>(null);
+  const [cacheMessage, setCacheMessage] = useState<string | null>(null);
   const isAndroid = Platform.OS === "android";
   const contentPaddingTop = topSystemInset(insets.top) + 18;
+
+  useEffect(() => {
+    let cancelled = false;
+    getWarmOrgCacheStatus(config)
+      .then((status) => {
+        if (!cancelled) {
+          setCacheStatus(status);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setCacheMessage(`Cache status failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config]);
+
+  const handleRefreshCache = async () => {
+    if (cacheAction) {
+      return;
+    }
+    setCacheAction("refresh");
+    setCacheMessage("Refreshing workspace cache…");
+    try {
+      const metrics = await refreshWarmOrgWorkspace(queryClient, config);
+      setCacheStatus(await getWarmOrgCacheStatus(config));
+      setCacheMessage(`Refresh complete · ${formatCacheMetrics(metrics)}`);
+    } catch (error) {
+      setCacheMessage(`Refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setCacheAction(null);
+    }
+  };
+
+  const handleClearCache = async () => {
+    if (cacheAction) {
+      return;
+    }
+    setCacheAction("clear");
+    setCacheMessage("Clearing local cache…");
+    try {
+      await clearWarmOrgCache(queryClient);
+      clearDocumentSourceCache();
+      setCacheStatus(await getWarmOrgCacheStatus(config));
+      setCacheMessage("Local cache cleared");
+    } catch (error) {
+      setCacheMessage(`Clear failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setCacheAction(null);
+    }
+  };
 
   const handleAddRoot = () => {
     if (!newRoot.trim()) {
@@ -321,6 +414,41 @@ export default function SettingsScreen() {
           <Text style={styles.pickerText}>Verify Configured Folders</Text>
         </TouchableOpacity>
       )}
+      <Text style={[styles.sectionHeading, { marginTop: 28 }]}>Cache controls</Text>
+      <View style={styles.cachePanel}>
+        <Text style={styles.cacheStatus} testID="cache-last-indexed">
+          {formatCacheAge(cacheStatus)}
+        </Text>
+        <Text style={styles.cacheDetail}>
+          {cacheStatus?.exists
+            ? `${cacheStatus.documents} docs · ${cacheStatus.payloads} payloads · ${cacheStatus.agendaItems} agenda · ${cacheStatus.roamNodes} roam`
+            : "No local org cache yet"}
+        </Text>
+        <View style={styles.cacheButtonRow}>
+          <TouchableOpacity
+            style={[styles.cacheButton, cacheAction && styles.disabledButton]}
+            onPress={handleRefreshCache}
+            disabled={Boolean(cacheAction)}
+            testID="cache-refresh-workspace"
+          >
+            <Text style={styles.pickerText}>
+              {cacheAction === "refresh" ? "Refreshing…" : "Refresh workspace"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.cacheButton, styles.cacheDangerButton, cacheAction && styles.disabledButton]}
+            onPress={handleClearCache}
+            disabled={Boolean(cacheAction)}
+            testID="cache-clear-local-cache"
+          >
+            <Text style={styles.pickerText}>
+              {cacheAction === "clear" ? "Clearing…" : "Clear local cache"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        {cacheMessage && <Text style={styles.cacheDetail}>{cacheMessage}</Text>}
+      </View>
+
       {listingSummaries.map((summary) => (
         <View key={summary.kind} style={styles.fileListPanel}>
           <Text style={styles.fileListTitle}>
@@ -474,6 +602,44 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1,
     borderColor: "#3D4638",
+  },
+  cachePanel: {
+    borderWidth: 1,
+    borderColor: "#303B2D",
+    backgroundColor: "#0B130A",
+    borderRadius: 12,
+    padding: 14,
+  },
+  cacheStatus: {
+    color: "#F2F5EC",
+    fontSize: 17,
+    lineHeight: 24,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  cacheDetail: {
+    color: "#9BA394",
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 6,
+  },
+  cacheButtonRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 12,
+  },
+  cacheButton: {
+    flex: 1,
+    backgroundColor: "#182116",
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#3D4638",
+  },
+  cacheDangerButton: {
+    backgroundColor: "#211615",
+    borderColor: "#513832",
   },
   fileListPanel: {
     marginTop: 16,

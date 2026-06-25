@@ -7,7 +7,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  Switch,
   ActivityIndicator,
   ScrollView,
   TextInput,
@@ -41,6 +40,7 @@ import {
   type OrgBlockViewModel,
 } from "../../lib/orgLexicalModel";
 import {
+  clearDocumentSourceCache,
   listDocumentsForConfig,
   loadDocumentForConfig,
   resolveDocumentPath,
@@ -70,16 +70,12 @@ import {
   type HeadingPlacement,
   type MoveKind,
 } from "../../lib/orgDocumentActions";
-
-type NoteLine = {
-  text: string;
-  checked?: boolean | null;
-  kind: "heading" | "list" | "body";
-  lineStart?: number;
-  todo?: string | null;
-  priority?: string | null;
-  tags?: string[];
-};
+import {
+  buildNotePreview,
+  type MeasuredNotePreviews,
+  type NoteLine,
+  type NotePreview,
+} from "../../lib/notePreviews";
 
 type SourceTokenKind =
   | "plain"
@@ -115,24 +111,6 @@ type RenderedInlineToken = {
   kind: RenderedInlineTokenKind;
 };
 
-type NoteMetadata = {
-  todo?: string | null;
-  priority?: string | null;
-  scheduled?: string | null;
-  deadline?: string | null;
-  habit?: boolean;
-  properties: Array<{ key: string; value: string }>;
-};
-
-type NotePreview = {
-  doc: DocumentRef;
-  title: string;
-  lines: NoteLine[];
-  checkedCount: number;
-  tags: string[];
-  metadata: NoteMetadata;
-  primaryDate?: string | null;
-};
 
 type ChecklistItem = {
   id: string;
@@ -365,7 +343,7 @@ async function loadPreviewOrSkip(
     if (!payload.raw.trim()) {
       return null;
     }
-    return buildPreview(doc, payload);
+    return buildNotePreview(doc, payload);
   } catch (error) {
     console.warn("Postep preview load skipped", {
       name: doc.name,
@@ -562,109 +540,6 @@ function titleFromDocument(doc: DocumentRef, nodes: LexicalNode[]) {
     return heading.text.trim();
   }
   return doc.name.replace(/\.org$/i, "");
-}
-
-function buildPreview(doc: DocumentRef, payload: DocumentPayload): NotePreview {
-  const title = titleFromDocument(doc, payload.lexical);
-  const firstHeading = payload.lexical.find(
-    (node): node is Extract<LexicalNode, { type: "heading" }> =>
-      node.type === "heading",
-  );
-  const planning = payload.lexical.filter(
-    (node): node is Extract<LexicalNode, { type: "planning" }> =>
-      node.type === "planning",
-  );
-  const propertyDrawer = payload.lexical.find(
-    (node): node is Extract<LexicalNode, { type: "property_drawer" }> =>
-      node.type === "property_drawer",
-  );
-  const metadata: NoteMetadata = {
-    todo: firstHeading?.todo_keyword ?? null,
-    priority: firstHeading?.priority ?? null,
-    scheduled: humanizeTimestamp(
-      planning.find((node) => node.keyword === "SCHEDULED")?.text,
-    ),
-    deadline: humanizeTimestamp(
-      planning.find((node) => node.keyword === "DEADLINE")?.text,
-    ),
-    habit: Boolean(
-      firstHeading?.tags.includes("habit") ||
-      propertyDrawer?.properties.STYLE?.toLowerCase() === "habit",
-    ),
-    properties: propertyDrawer
-      ? Object.entries(propertyDrawer.properties)
-          .filter(([key]) =>
-            ["STYLE", "LAST_REPEAT", "EFFORT"].includes(key.toUpperCase()),
-          )
-          .map(([key, value]) => ({ key, value }))
-      : [],
-  };
-  const lines: NoteLine[] = payload.lexical
-    .flatMap((node): NoteLine[] => {
-      if (node.type === "heading") {
-        const text = textForNode(node);
-        return text && text !== title
-          ? [{
-              text,
-              kind: "heading",
-              todo: node.todo_keyword ?? null,
-              priority: node.priority ?? null,
-              tags: node.tags,
-            }]
-          : [];
-      }
-      if (node.type === "list_item") {
-        const text = listItemPreviewText(payload.raw, node);
-        return text
-          ? [
-              {
-                text,
-                checked: node.checked ?? null,
-                kind: "list",
-                lineStart: node.line_start,
-              },
-            ]
-          : [];
-      }
-      if (node.type === "paragraph") {
-        const text = textForNode(node);
-        return text && !isInternalParagraph(text)
-          ? [{ text, kind: "body" }]
-          : [];
-      }
-      if (node.type === "table") {
-        const text = textForNode(node);
-        return text ? [{ text, kind: "body" }] : [];
-      }
-      return [];
-    })
-    .slice(0, 7);
-  const checkedCount = payload.lexical.filter(
-    (node) => node.type === "list_item" && node.checked,
-  ).length;
-  const tags = Array.from(
-    new Set(
-      payload.lexical
-        .filter(
-          (node): node is Extract<LexicalNode, { type: "heading" }> =>
-            node.type === "heading",
-        )
-        .flatMap((node) => node.tags),
-    ),
-  ).slice(0, 3);
-
-  return {
-    doc,
-    title,
-    lines,
-    checkedCount,
-    tags,
-    metadata,
-    primaryDate:
-      metadata.scheduled?.slice(0, 10) ??
-      metadata.deadline?.slice(0, 10) ??
-      null,
-  };
 }
 
 function buildChecklistItems(
@@ -996,10 +871,13 @@ export default function LibraryScreen() {
     [],
   );
 
+  const documentsKey = documentsQueryKey(bridgeConfig);
+  const cachedDocuments = queryClient.getQueryData<DocumentRef[]>(documentsKey);
   const documentsQuery = useQuery({
-    queryKey: documentsQueryKey(bridgeConfig),
+    queryKey: documentsKey,
     queryFn: () => listDocumentsForConfig(bridgeConfig),
     enabled: hasConfiguredRoots,
+    initialData: cachedDocuments,
   });
 
   // Open requests arrive as a route param (e.g. from the roam screen). Apply
@@ -1050,12 +928,15 @@ export default function LibraryScreen() {
     setDocumentDraftRaw("");
   }, [selectedPath]);
 
+  const previewKey = documentPreviewsQueryKey(
+    bridgeConfig,
+    documentsQuery.data?.map((doc) => doc.path),
+  );
+  const cachedPreviews = queryClient.getQueryData<MeasuredNotePreviews>(previewKey);
   const previewsQuery = useQuery({
-    queryKey: documentPreviewsQueryKey(
-      bridgeConfig,
-      documentsQuery.data?.map((doc) => doc.path),
-    ),
+    queryKey: previewKey,
     enabled: !selectedPath && Boolean(documentsQuery.data) && hasConfiguredRoots,
+    initialData: cachedPreviews,
     queryFn: () =>
       measureAsyncInteraction("noteGrid", async () => {
         const documents = documentsQuery.data ?? [];
@@ -1114,9 +995,12 @@ export default function LibraryScreen() {
     });
   }, [noteGrid.value, searchQuery]);
 
+  const selectedDocumentQueryKey = documentQueryKey(bridgeConfig, selectedPath ?? "");
+  const cachedDocument = queryClient.getQueryData<DocumentPayload>(selectedDocumentQueryKey);
   const documentQuery = useQuery({
-    queryKey: documentQueryKey(bridgeConfig, selectedPath ?? ""),
+    queryKey: selectedDocumentQueryKey,
     enabled: Boolean(selectedPath) && hasConfiguredRoots,
+    initialData: cachedDocument,
     queryFn: () => loadDocumentForConfig(bridgeConfig, selectedPath!),
   });
 
@@ -1170,6 +1054,7 @@ export default function LibraryScreen() {
   }, [lexicalDocument.metric.elapsedMs, noteGrid.metric.elapsedMs, selectedPath]);
 
   const onRefreshDocuments = () => {
+    clearDocumentSourceCache();
     queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] === "documents",
     });
@@ -1882,7 +1767,7 @@ export default function LibraryScreen() {
         <View style={styles.documentDialogSection}>
           {renderDialogButton("Edit source", openEditor, "document-action-edit-source")}
           {renderDialogButton(
-            readerMode ? "Reader off" : "Reader on",
+            readerMode ? "Reader mode: On" : "Reader mode: Off",
             () => {
               setReaderMode((value) => !value);
               closeDocumentDialog();
@@ -1890,7 +1775,7 @@ export default function LibraryScreen() {
             "document-action-toggle-reader",
           )}
           {renderDialogButton(
-            outlineOnly ? "Outline off" : "Outline on",
+            outlineOnly ? "Outline mode: On" : "Outline mode: Off",
             () => {
               setOutlineOnly((value) => !value);
               closeDocumentDialog();
@@ -2185,7 +2070,8 @@ export default function LibraryScreen() {
             ListHeaderComponent={() =>
               hasConfiguredRoots &&
               visibleNotes.length === 0 &&
-              (documentsQuery.isPending || previewsQuery.isPending) ? (
+              ((!documentsQuery.data && documentsQuery.isPending) ||
+                (!previewsQuery.data && previewsQuery.isPending)) ? (
                 <View style={styles.loadingSourceBanner}>
                   <ActivityIndicator color="#AFC0FF" />
                   <Text style={styles.loadingSourceText}>Loading notes…</Text>
@@ -2196,7 +2082,8 @@ export default function LibraryScreen() {
               <View style={styles.emptyDocs}>
                 {hasConfiguredRoots &&
                 visibleNotes.length === 0 &&
-                (documentsQuery.isPending || previewsQuery.isPending) ? null : (
+                ((!documentsQuery.data && documentsQuery.isPending) ||
+                  (!previewsQuery.data && previewsQuery.isPending)) ? null : (
                   <Text style={styles.emptyDocsText}>
                     {searchQuery.trim()
                       ? "No notes match that search."
@@ -2284,25 +2171,6 @@ export default function LibraryScreen() {
             </TouchableOpacity>
           </View>
 
-          <View
-            style={[
-              styles.documentModeBar,
-              {
-                backgroundColor: editTheme.background,
-                borderBottomColor: editTheme.border,
-              },
-            ]}
-            testID="document-mode-bar"
-          >
-            <View style={styles.switchItem}>
-              <Text style={[styles.switchLabel, { color: editTheme.text }]}>Reader</Text>
-              <Switch value={readerMode} onValueChange={setReaderMode} />
-            </View>
-            <View style={styles.switchItem}>
-              <Text style={[styles.switchLabel, { color: editTheme.text }]}>Outline</Text>
-              <Switch value={outlineOnly} onValueChange={setOutlineOnly} />
-            </View>
-          </View>
 
           <ScrollView
             testID="document-scroll"
@@ -2312,22 +2180,19 @@ export default function LibraryScreen() {
               { backgroundColor: editTheme.background },
             ]}
           >
-            {documentQuery.isFetching ? (
-              <ActivityIndicator
-                style={{ marginVertical: 24 }}
-                color="#5F6F85"
-              />
-            ) : documentQuery.data ? (
+            {documentQuery.data ? (
               isEditingDocument ? (
                 <View style={[styles.documentEditLane, { backgroundColor: editTheme.background, borderColor: editTheme.border }]} testID="document-edit-lane">
-                  <Text style={[styles.documentEditTitle, { color: editTheme.text }]}>Edit source</Text>
-                  <View style={styles.documentEditActions}>
-                    <TouchableOpacity style={styles.documentDialogButton} testID="document-edit-save" accessibilityLabel="Save" onPress={saveDocumentEdit}>
-                      <Text style={styles.documentDialogButtonText}>Save</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.documentDialogButtonSecondary} testID="document-edit-cancel" accessibilityLabel="Cancel" onPress={cancelDocumentEdit}>
-                      <Text style={styles.documentDialogButtonSecondaryText}>Cancel</Text>
-                    </TouchableOpacity>
+                  <View style={styles.documentEditHeader}>
+                    <Text style={[styles.documentEditTitle, { color: editTheme.text }]}>Edit source</Text>
+                    <View style={styles.documentEditActions}>
+                      <TouchableOpacity style={styles.documentDialogButton} testID="document-edit-save" accessibilityLabel="Save" onPress={saveDocumentEdit}>
+                        <Text style={styles.documentDialogButtonText}>Save</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.documentDialogButtonSecondary} testID="document-edit-cancel" accessibilityLabel="Cancel" onPress={cancelDocumentEdit}>
+                        <Text style={styles.documentDialogButtonSecondaryText}>Cancel</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                   {renderSourcePreview(documentDraftRaw)}
                   <TextInput
@@ -2354,6 +2219,11 @@ export default function LibraryScreen() {
                   onSelectNode={selectDocumentNode}
                 />
               )
+            ) : documentQuery.isFetching ? (
+              <ActivityIndicator
+                style={{ marginVertical: 24 }}
+                color="#5F6F85"
+              />
             ) : (
               <Text style={styles.emptyDocument}>
                 Select an Org file to view its contents.
@@ -3330,28 +3200,6 @@ const styles = StyleSheet.create({
   editorTitleBlock: { flex: 1, minWidth: 0 },
   editorTitle: { color: "#252832", fontSize: 20, fontWeight: "800" },
   editorSubtitle: { color: "#6B7280", fontSize: 11, marginTop: 2 },
-  switchRow: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#2E3A2B",
-  },
-  switchItem: { flexDirection: "row", alignItems: "center", gap: 8 },
-  switchLabel: { color: "#4B5563", fontSize: 16, fontWeight: "700" },
-  documentModeBar: {
-    minHeight: 54,
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#DADAE4",
-    backgroundColor: "#FAF9FD",
-  },
   actionButton: {
     backgroundColor: "#22301E",
     paddingVertical: 10,
@@ -3374,11 +3222,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 14,
   },
+  documentEditHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+  },
   documentEditTitle: {
+    flexShrink: 1,
     fontSize: 18,
     lineHeight: 24,
     fontWeight: "800",
-    marginBottom: 10,
   },
   documentSourceInput: {
     minHeight: 420,
@@ -3392,8 +3247,9 @@ const styles = StyleSheet.create({
   documentEditActions: {
     flexDirection: "row",
     justifyContent: "flex-end",
+    alignItems: "center",
+    flexShrink: 0,
     gap: 10,
-    marginBottom: 12,
   },
   sourcePreview: {
     maxHeight: 230,

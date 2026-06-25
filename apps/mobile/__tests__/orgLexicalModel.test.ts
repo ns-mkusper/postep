@@ -321,4 +321,104 @@ Body with [[id:alpha][Alpha link]] and /italic/ text.
     assert.equal(paragraph.lineStart, 8);
     assert.equal(paragraph.lineEnd, 8);
   });
+
+  it('preserves heading planning metadata in outline projections', () => {
+    const nodes: LexicalNode[] = [
+      {
+        type: 'heading',
+        depth: 1,
+        text: 'Improve mobile UX',
+        raw: '* TODO Improve mobile UX',
+        line_start: 0,
+        line_end: 0,
+        todo_keyword: 'TODO',
+        priority: null,
+        tags: []
+      },
+      {
+        type: 'planning',
+        keyword: 'SCHEDULED',
+        text: '<2026-06-25 Thu 09:00>',
+        raw: 'SCHEDULED: <2026-06-25 Thu 09:00>',
+        line_start: 1,
+        line_end: 1
+      },
+      {
+        type: 'planning',
+        keyword: 'DEADLINE',
+        text: '<2026-06-26 Fri>',
+        raw: 'DEADLINE: <2026-06-26 Fri>',
+        line_start: 2,
+        line_end: 2
+      },
+      {
+        type: 'paragraph',
+        text: 'Body text should not appear in outline.',
+        raw: 'Body text should not appear in outline.',
+        line_start: 3,
+        line_end: 3
+      },
+      {
+        type: 'heading',
+        depth: 1,
+        text: 'Next heading',
+        raw: '* TODO Next heading',
+        line_start: 4,
+        line_end: 4,
+        todo_keyword: 'TODO',
+        priority: null,
+        tags: []
+      }
+    ];
+
+    const projection = lexicalNodesToProjection(nodes, '', { outlineOnly: true, readerMode: true });
+
+    assert.equal(projection.length, 2);
+    const first = projection[0];
+    assert.equal(first.type, 'heading');
+    if (first.type !== 'heading') {
+      assert.fail('expected first heading');
+    }
+    assert.deepEqual(first.planning, [
+      { keyword: 'SCHEDULED', text: '<2026-06-25 Thu 09:00>' },
+      { keyword: 'DEADLINE', text: '<2026-06-26 Fri>' }
+    ]);
+
+    const second = projection[1];
+    assert.equal(second.type, 'heading');
+    if (second.type !== 'heading') {
+      assert.fail('expected second heading');
+    }
+    assert.equal(second.planning, undefined);
+  });
+
+  it('attaches fallback raw planning lines to outline headings', () => {
+    const raw = `* TODO Improve Emacs experience
+SCHEDULED: <2026-06-25 Thu 07:00>
+DEADLINE: <2026-06-27 Sat>
+Body ignored in outline.
+* DONE Completed work
+CLOSED: [2026-06-24 Wed]`;
+
+    const document = createOrgLexicalDocument([], raw, { outlineOnly: true, readerMode: true });
+
+    assert.equal(document.projection.length, 2);
+    const todoHeading = document.projection[0];
+    assert.equal(todoHeading.type, 'heading');
+    if (todoHeading.type !== 'heading') {
+      assert.fail('expected TODO heading');
+    }
+    assert.deepEqual(todoHeading.planning, [
+      { keyword: 'SCHEDULED', text: '<2026-06-25 Thu 07:00>' },
+      { keyword: 'DEADLINE', text: '<2026-06-27 Sat>' }
+    ]);
+
+    const doneHeading = document.projection[1];
+    assert.equal(doneHeading.type, 'heading');
+    if (doneHeading.type !== 'heading') {
+      assert.fail('expected DONE heading');
+    }
+    assert.deepEqual(doneHeading.planning, [{ keyword: 'CLOSED', text: '[2026-06-24 Wed]' }]);
+  });
+
 });
