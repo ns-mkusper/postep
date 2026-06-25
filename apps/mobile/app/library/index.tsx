@@ -46,6 +46,7 @@ import {
   resolveDocumentPath,
   updateDocumentForConfig,
 } from "../../lib/documentSources";
+import { refreshWarmOrgWorkspace } from "../../lib/orgWarmCache";
 import {
   documentPreviewsQueryKey,
   documentQueryKey,
@@ -827,6 +828,7 @@ export default function LibraryScreen() {
   const [showCheckedItems, setShowCheckedItems] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
+  const [isSyncingOrgFiles, setIsSyncingOrgFiles] = useState(false);
   const [interactionStatus, setInteractionStatus] = useState<string | null>(
     null,
   );
@@ -1064,6 +1066,26 @@ export default function LibraryScreen() {
     queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] === "document",
     });
+  };
+
+  const syncOrgFilesFromMenu = async () => {
+    if (!hasConfiguredRoots || isSyncingOrgFiles) {
+      return;
+    }
+    setIsSyncingOrgFiles(true);
+    setInteractionStatus("Syncing Google Drive…");
+    try {
+      const metrics = await refreshWarmOrgWorkspace(queryClient, bridgeConfig);
+      setInteractionStatus(`Sync complete ${metrics.elapsedMs.toFixed(0)}ms`);
+      setIsAppMenuOpen(false);
+    } catch (error) {
+      console.warn("Postep manual Google Drive sync failed", error);
+      setInteractionStatus(
+        `Sync failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      setIsSyncingOrgFiles(false);
+    }
   };
 
   useBridgeEvent("documentsChanged", onRefreshDocuments);
@@ -1949,6 +1971,21 @@ export default function LibraryScreen() {
             </TouchableOpacity>
             <View style={styles.drawerDivider} />
             <TouchableOpacity
+              style={[
+                styles.drawerItem,
+                (!hasConfiguredRoots || isSyncingOrgFiles) &&
+                  styles.drawerItemDisabled,
+              ]}
+              onPress={syncOrgFilesFromMenu}
+              testID="drawer-item-sync-google-drive"
+              accessibilityLabel="Sync Google Drive"
+              disabled={!hasConfiguredRoots || isSyncingOrgFiles}
+            >
+              <Text style={styles.drawerItemText}>
+                {isSyncingOrgFiles ? "🔄 Syncing Google Drive…" : "🔄 Sync Google Drive"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               style={styles.drawerItem}
               onPress={() => navigateFromMenu("/settings")}
               testID="drawer-item-settings"
@@ -2065,8 +2102,6 @@ export default function LibraryScreen() {
               numColumns > 1 ? styles.columnWrapper : undefined
             }
             contentContainerStyle={styles.noteGrid}
-            refreshing={documentsQuery.isRefetching || previewsQuery.isRefetching}
-            onRefresh={onRefreshDocuments}
             ListHeaderComponent={() =>
               hasConfiguredRoots &&
               visibleNotes.length === 0 &&
@@ -2360,6 +2395,9 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 24,
     fontWeight: "800",
+  },
+  drawerItemDisabled: {
+    opacity: 0.55,
   },
   drawerDivider: {
     height: 1,
