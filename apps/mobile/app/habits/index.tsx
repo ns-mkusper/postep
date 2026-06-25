@@ -482,7 +482,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   doneButtonComplete: {
-    backgroundColor: "#54652D",
+    backgroundColor: "#2563EB",
+    borderLeftWidth: 1,
+    borderLeftColor: "#60A5FA",
   },
   actionButtonDisabled: {
     opacity: 0.65,
