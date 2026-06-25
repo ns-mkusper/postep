@@ -16,8 +16,10 @@ import {
   snapshotDocumentSourceCache,
 } from "./documentSources";
 import { loadRoamGraphForConfig } from "./roamSources";
+import { buildMeasuredNotePreviews, type MeasuredNotePreviews } from "./notePreviews";
 import {
   agendaQueryKey,
+  documentPreviewsQueryKey,
   documentQueryKey,
   documentsQueryKey,
   hasConfiguredOrgRoots,
@@ -30,6 +32,7 @@ const LEGACY_CACHE_FILE = "postep-org-warm-cache-v1.json";
 const MANIFEST_FILE = "manifest.json";
 const AGENDA_FILE = "agenda.json";
 const ROAM_FILE = "roam.json";
+const PREVIEWS_FILE = "previews.json";
 const DOCUMENTS_DIR = "documents/";
 const MAX_PERSISTED_DOCUMENTS = 400;
 
@@ -93,6 +96,7 @@ type IndexedWarmOrgSnapshot = {
   payloads: DocumentPayload[];
   agenda?: AgendaSnapshot;
   roam?: RoamGraph;
+  previews?: MeasuredNotePreviews;
 };
 
 let warmPromise: { configKey: string; promise: Promise<WarmOrgCacheMetrics> } | null = null;
@@ -193,6 +197,15 @@ async function hydrateWarmOrgCacheOnce(
 
   hydrateDocumentSourceCache(snapshot.manifest.documentSourceCache);
   queryClient.setQueryData(documentsQueryKey(config), snapshot.manifest.documents);
+  if (snapshot.previews) {
+    queryClient.setQueryData(
+      documentPreviewsQueryKey(
+        config,
+        snapshot.manifest.documents.map((document) => document.path),
+      ),
+      snapshot.previews,
+    );
+  }
   if (snapshot.agenda) {
     queryClient.setQueryData(agendaQueryKey(config), snapshot.agenda);
   }
@@ -233,6 +246,7 @@ async function warmOrgWorkspaceOnce(
   const roam = await loadRoamGraphForConfig(config);
 
   const payloads = cachedDocumentPayloads().slice(0, MAX_PERSISTED_DOCUMENTS);
+  const previews = buildMeasuredNotePreviews(documents, payloads);
   const previousByPath = new Map(
     existing?.manifest.documentMetadata.map((metadata) => [metadata.pathKey, metadata]) ?? [],
   );
@@ -263,6 +277,10 @@ async function warmOrgWorkspaceOnce(
   });
 
   queryClient.setQueryData(documentsQueryKey(config), documents);
+  queryClient.setQueryData(
+    documentPreviewsQueryKey(config, documents.map((document) => document.path)),
+    previews,
+  );
   queryClient.setQueryData(agendaQueryKey(config), agenda);
   queryClient.setQueryData(roamQueryKey(config), roam);
   for (const payload of payloads) {
@@ -289,10 +307,10 @@ async function warmOrgWorkspaceOnce(
     documentSourceCache: snapshotDocumentSourceCache(MAX_PERSISTED_DOCUMENTS),
   };
 
-  await writeIndexedSnapshot({ manifest, payloads, agenda, roam }, existing?.manifest ?? null);
+  await writeIndexedSnapshot({ manifest, payloads, agenda, roam, previews }, existing?.manifest ?? null);
 
   const metrics = snapshotMetrics(
-    { manifest, payloads, agenda, roam },
+    { manifest, payloads, agenda, roam, previews },
     now() - startedAt,
     false,
     { changedDocuments, unchangedDocuments, removedDocuments },
@@ -311,7 +329,8 @@ async function readIndexedSnapshot(config: OrgBridgeConfig): Promise<IndexedWarm
   ).filter((payload): payload is DocumentPayload => Boolean(payload));
   const agenda = await readAgenda();
   const roam = await readRoam();
-  return { manifest, payloads, agenda, roam };
+  const previews = await readPreviews();
+  return { manifest, payloads, agenda, roam, previews };
 }
 
 async function writeIndexedSnapshot(
@@ -345,6 +364,9 @@ async function writeIndexedSnapshot(
     if (snapshot.roam) {
       await writeJson(ROAM_FILE, snapshot.roam);
     }
+    if (snapshot.previews) {
+      await writeJson(PREVIEWS_FILE, snapshot.previews);
+    }
     await writeJson(MANIFEST_FILE, snapshot.manifest);
   } catch (error) {
     console.warn("Postep warm cache write skipped", error);
@@ -361,6 +383,10 @@ async function readAgenda(): Promise<AgendaSnapshot | undefined> {
 
 async function readRoam(): Promise<RoamGraph | undefined> {
   return await readJson<RoamGraph>(ROAM_FILE) ?? undefined;
+}
+
+async function readPreviews(): Promise<MeasuredNotePreviews | undefined> {
+  return await readJson<MeasuredNotePreviews>(PREVIEWS_FILE) ?? undefined;
 }
 
 async function readDocumentPayload(key: string): Promise<DocumentPayload | null> {

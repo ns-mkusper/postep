@@ -17,7 +17,13 @@ import {
   hydrateWarmOrgCache,
   refreshWarmOrgWorkspace,
 } from "../lib/orgWarmCache";
-import { documentsQueryKey, documentQueryKey, agendaQueryKey, roamQueryKey } from "../lib/queryKeys";
+import {
+  agendaQueryKey,
+  documentPreviewsQueryKey,
+  documentQueryKey,
+  documentsQueryKey,
+  roamQueryKey,
+} from "../lib/queryKeys";
 
 declare const globalThis: typeof global & {
   __postepContentUri?: {
@@ -84,9 +90,13 @@ describe("indexed org warm cache", () => {
     const documents = restartedClient.getQueryData(documentsQueryKey(config));
     const agenda = restartedClient.getQueryData(agendaQueryKey(config));
     const roam = restartedClient.getQueryData(roamQueryKey(config));
+    const previews = restartedClient.getQueryData(
+      documentPreviewsQueryKey(config, Array.from(makeDocs(8).keys())),
+    );
     assert.ok(Array.isArray(documents));
     assert.ok(agenda);
     assert.ok(roam);
+    assert.ok(previews);
 
     const payload = await loadDocumentForConfig(config, driveUri("cache-01.org"));
     assert.equal(payload.raw.includes("Cache sample 1"), true);

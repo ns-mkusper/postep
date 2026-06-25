@@ -71,16 +71,12 @@ import {
   type HeadingPlacement,
   type MoveKind,
 } from "../../lib/orgDocumentActions";
-
-type NoteLine = {
-  text: string;
-  checked?: boolean | null;
-  kind: "heading" | "list" | "body";
-  lineStart?: number;
-  todo?: string | null;
-  priority?: string | null;
-  tags?: string[];
-};
+import {
+  buildNotePreview,
+  type MeasuredNotePreviews,
+  type NoteLine,
+  type NotePreview,
+} from "../../lib/notePreviews";
 
 type SourceTokenKind =
   | "plain"
@@ -116,26 +112,6 @@ type RenderedInlineToken = {
   kind: RenderedInlineTokenKind;
 };
 
-type NoteMetadata = {
-  todo?: string | null;
-  priority?: string | null;
-  scheduled?: string | null;
-  deadline?: string | null;
-  habit?: boolean;
-  properties: Array<{ key: string; value: string }>;
-};
-
-type NotePreview = {
-  doc: DocumentRef;
-  title: string;
-  lines: NoteLine[];
-  checkedCount: number;
-  tags: string[];
-  metadata: NoteMetadata;
-  primaryDate?: string | null;
-};
-
-type MeasuredNotePreviews = Awaited<ReturnType<typeof measureAsyncInteraction<NotePreview[]>>>;
 
 type ChecklistItem = {
   id: string;
@@ -368,7 +344,7 @@ async function loadPreviewOrSkip(
     if (!payload.raw.trim()) {
       return null;
     }
-    return buildPreview(doc, payload);
+    return buildNotePreview(doc, payload);
   } catch (error) {
     console.warn("Postep preview load skipped", {
       name: doc.name,
@@ -565,109 +541,6 @@ function titleFromDocument(doc: DocumentRef, nodes: LexicalNode[]) {
     return heading.text.trim();
   }
   return doc.name.replace(/\.org$/i, "");
-}
-
-function buildPreview(doc: DocumentRef, payload: DocumentPayload): NotePreview {
-  const title = titleFromDocument(doc, payload.lexical);
-  const firstHeading = payload.lexical.find(
-    (node): node is Extract<LexicalNode, { type: "heading" }> =>
-      node.type === "heading",
-  );
-  const planning = payload.lexical.filter(
-    (node): node is Extract<LexicalNode, { type: "planning" }> =>
-      node.type === "planning",
-  );
-  const propertyDrawer = payload.lexical.find(
-    (node): node is Extract<LexicalNode, { type: "property_drawer" }> =>
-      node.type === "property_drawer",
-  );
-  const metadata: NoteMetadata = {
-    todo: firstHeading?.todo_keyword ?? null,
-    priority: firstHeading?.priority ?? null,
-    scheduled: humanizeTimestamp(
-      planning.find((node) => node.keyword === "SCHEDULED")?.text,
-    ),
-    deadline: humanizeTimestamp(
-      planning.find((node) => node.keyword === "DEADLINE")?.text,
-    ),
-    habit: Boolean(
-      firstHeading?.tags.includes("habit") ||
-      propertyDrawer?.properties.STYLE?.toLowerCase() === "habit",
-    ),
-    properties: propertyDrawer
-      ? Object.entries(propertyDrawer.properties)
-          .filter(([key]) =>
-            ["STYLE", "LAST_REPEAT", "EFFORT"].includes(key.toUpperCase()),
-          )
-          .map(([key, value]) => ({ key, value }))
-      : [],
-  };
-  const lines: NoteLine[] = payload.lexical
-    .flatMap((node): NoteLine[] => {
-      if (node.type === "heading") {
-        const text = textForNode(node);
-        return text && text !== title
-          ? [{
-              text,
-              kind: "heading",
-              todo: node.todo_keyword ?? null,
-              priority: node.priority ?? null,
-              tags: node.tags,
-            }]
-          : [];
-      }
-      if (node.type === "list_item") {
-        const text = listItemPreviewText(payload.raw, node);
-        return text
-          ? [
-              {
-                text,
-                checked: node.checked ?? null,
-                kind: "list",
-                lineStart: node.line_start,
-              },
-            ]
-          : [];
-      }
-      if (node.type === "paragraph") {
-        const text = textForNode(node);
-        return text && !isInternalParagraph(text)
-          ? [{ text, kind: "body" }]
-          : [];
-      }
-      if (node.type === "table") {
-        const text = textForNode(node);
-        return text ? [{ text, kind: "body" }] : [];
-      }
-      return [];
-    })
-    .slice(0, 7);
-  const checkedCount = payload.lexical.filter(
-    (node) => node.type === "list_item" && node.checked,
-  ).length;
-  const tags = Array.from(
-    new Set(
-      payload.lexical
-        .filter(
-          (node): node is Extract<LexicalNode, { type: "heading" }> =>
-            node.type === "heading",
-        )
-        .flatMap((node) => node.tags),
-    ),
-  ).slice(0, 3);
-
-  return {
-    doc,
-    title,
-    lines,
-    checkedCount,
-    tags,
-    metadata,
-    primaryDate:
-      metadata.scheduled?.slice(0, 10) ??
-      metadata.deadline?.slice(0, 10) ??
-      null,
-  };
 }
 
 function buildChecklistItems(
