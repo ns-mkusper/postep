@@ -306,6 +306,12 @@ jobs:
             adb shell am force-stop com.postep.mobile || true
             bash -euo pipefail -c 'SCREENSHOT_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-screenshots-after" METRICS_DIR="${{ github.workspace }}/apps/mobile/e2e-artifacts/android-performance-after" ANDROID_STRICT_DOCUMENT_ASSERTIONS=1 ANDROID_ENFORCE_PERFORMANCE_BUDGETS=1 APK_PATH="${{ github.workspace }}/apps/mobile/e2e-artifacts/apks/head-app-debug.apk" METRO_PORT=8081 EXPO_LOG=/tmp/postep-head-expo-screenshots.log bash "${{ github.workspace }}/apps/mobile/e2e/capture-android-screenshots.sh"'
 
+      - name: Verify Android screenshot coverage
+        if: always()
+        run: |
+          test -s apps/mobile/e2e-artifacts/android-screenshots-before/15-habits.png
+          test -s apps/mobile/e2e-artifacts/android-screenshots-after/15-habits.png
+
       - name: Compare Android emulator screenshots
         if: always()
         working-directory: apps/mobile

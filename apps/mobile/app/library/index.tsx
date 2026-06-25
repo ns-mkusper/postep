@@ -2183,14 +2183,16 @@ export default function LibraryScreen() {
             {documentQuery.data ? (
               isEditingDocument ? (
                 <View style={[styles.documentEditLane, { backgroundColor: editTheme.background, borderColor: editTheme.border }]} testID="document-edit-lane">
-                  <Text style={[styles.documentEditTitle, { color: editTheme.text }]}>Edit source</Text>
-                  <View style={styles.documentEditActions}>
-                    <TouchableOpacity style={styles.documentDialogButton} testID="document-edit-save" accessibilityLabel="Save" onPress={saveDocumentEdit}>
-                      <Text style={styles.documentDialogButtonText}>Save</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.documentDialogButtonSecondary} testID="document-edit-cancel" accessibilityLabel="Cancel" onPress={cancelDocumentEdit}>
-                      <Text style={styles.documentDialogButtonSecondaryText}>Cancel</Text>
-                    </TouchableOpacity>
+                  <View style={styles.documentEditHeader}>
+                    <Text style={[styles.documentEditTitle, { color: editTheme.text }]}>Edit source</Text>
+                    <View style={styles.documentEditActions}>
+                      <TouchableOpacity style={styles.documentDialogButton} testID="document-edit-save" accessibilityLabel="Save" onPress={saveDocumentEdit}>
+                        <Text style={styles.documentDialogButtonText}>Save</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.documentDialogButtonSecondary} testID="document-edit-cancel" accessibilityLabel="Cancel" onPress={cancelDocumentEdit}>
+                        <Text style={styles.documentDialogButtonSecondaryText}>Cancel</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                   {renderSourcePreview(documentDraftRaw)}
                   <TextInput
@@ -3220,11 +3222,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 14,
   },
+  documentEditHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+  },
   documentEditTitle: {
+    flexShrink: 1,
     fontSize: 18,
     lineHeight: 24,
     fontWeight: "800",
-    marginBottom: 10,
   },
   documentSourceInput: {
     minHeight: 420,
@@ -3238,8 +3247,9 @@ const styles = StyleSheet.create({
   documentEditActions: {
     flexDirection: "row",
     justifyContent: "flex-end",
+    alignItems: "center",
+    flexShrink: 0,
     gap: 10,
-    marginBottom: 12,
   },
   sourcePreview: {
     maxHeight: 230,
