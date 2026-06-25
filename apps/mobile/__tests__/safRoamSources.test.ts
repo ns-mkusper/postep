@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 
 import type { OrgBridgeConfig } from "@postep/bridge";
+import { clearDocumentSourceCache, resetDocumentSourceStats } from "../lib/documentSources";
 import { loadRoamGraphForConfig } from "../lib/roamSources";
 
 declare const globalThis: typeof global & {
@@ -22,6 +23,8 @@ const roamRootUri = "content://com.google.android.apps.docs.storage/tree/roam";
 const config: OrgBridgeConfig = { roots: [], roamRoots: [roamRootUri] };
 
 afterEach(() => {
+  clearDocumentSourceCache();
+  resetDocumentSourceStats();
   delete globalThis.__postepContentUri;
 });
 

@@ -8,11 +8,12 @@ import {
   ScrollView,
   TextInput,
 } from "react-native";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 
 import { useBridgeConfig, useOrgConfig } from "../../store/orgConfig";
 import { useBridgeEvent } from "../../hooks/useBridgeEvent";
+import { clearDocumentSourceCache } from "../../lib/documentSources";
 import { loadRoamGraphForConfig } from "../../lib/roamSources";
 import { hasConfiguredOrgRoots, roamQueryKey } from "../../lib/queryKeys";
 import {
@@ -36,6 +37,7 @@ const FILTERS: FilterOption[] = [
 
 export default function RoamScreen() {
   const config = useBridgeConfig();
+  const queryClient = useQueryClient();
   const hasHydratedConfig = useOrgConfig((state) => state.hasHydrated);
   const hasConfiguredRoots = hasConfiguredOrgRoots(config);
   const [mode, setMode] = useState<RoamPanel>("graph");
@@ -46,17 +48,27 @@ export default function RoamScreen() {
   const [relationshipFilter, setRelationshipFilter] =
     useState<RoamRelationshipFilter>("all");
 
+  const roamKey = roamQueryKey(config);
+  const cachedRoam = queryClient.getQueryData<Awaited<ReturnType<typeof loadRoamGraphForConfig>>>(roamKey);
+
   const roamQuery = useQuery({
-    queryKey: roamQueryKey(config),
+    queryKey: roamKey,
     queryFn: () =>
       hasConfiguredRoots
         ? loadRoamGraphForConfig(config)
         : Promise.resolve({ nodes: [], links: [] }),
     enabled: hasHydratedConfig,
+    initialData: cachedRoam,
   });
 
-  useBridgeEvent("documentsChanged", () => roamQuery.refetch());
-  useBridgeEvent("rootsChanged", () => roamQuery.refetch());
+  useBridgeEvent("documentsChanged", () => {
+    clearDocumentSourceCache();
+    void roamQuery.refetch();
+  });
+  useBridgeEvent("rootsChanged", () => {
+    clearDocumentSourceCache();
+    void roamQuery.refetch();
+  });
 
   const explorer = useMemo(
     () =>

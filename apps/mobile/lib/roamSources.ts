@@ -4,7 +4,13 @@ import {
   type RoamGraph,
 } from "@postep/bridge";
 
-import { dedupeSourceList, isSafUri, normalizeSourceIdentity } from "./documentSources";
+import {
+  dedupeSourceList,
+  isSafUri,
+  listDocumentsForConfig,
+  loadDocumentForConfig,
+  normalizeSourceIdentity,
+} from "./documentSources";
 
 const ROAM_LOAD_CONCURRENCY = 12;
 const ROAM_DOC_LOAD_TIMEOUT_MS = 2000;
@@ -45,20 +51,9 @@ function splitNativeConfig(config: OrgBridgeConfig): OrgBridgeConfig {
 }
 
 async function loadSafRoamGraph(roots: string[]): Promise<RoamGraph> {
-  const { listOrgFilesRecursively, readOrgFile } = await import(
-    "@postep/bridge/platform/android/saf"
+  const files = (await listDocumentsForConfig({ roots: [], roamRoots: roots })).map(
+    (doc): SafOrgFile => ({ uri: doc.path, name: doc.name }),
   );
-  const files: SafOrgFile[] = [];
-
-  for (const root of dedupeSourceList(roots)) {
-    const listing = await listOrgFilesRecursively(root);
-    console.log("Postep SAF roam listing", {
-      root,
-      files: listing.files.length,
-      errors: listing.errors.length,
-    });
-    files.push(...listing.files);
-  }
 
   const uniqueFiles = dedupeFiles(files);
   const documents = await mapConcurrent(
@@ -68,11 +63,13 @@ async function loadSafRoamGraph(roots: string[]): Promise<RoamGraph> {
       try {
         return {
           file,
-          raw: await withTimeout(
-            readOrgFile(file.uri),
-            ROAM_DOC_LOAD_TIMEOUT_MS,
-            `${file.name} timed out after ${ROAM_DOC_LOAD_TIMEOUT_MS}ms`,
-          ),
+          raw: (
+            await withTimeout(
+              loadDocumentForConfig({ roots: [], roamRoots: roots }, file.uri),
+              ROAM_DOC_LOAD_TIMEOUT_MS,
+              `${file.name} timed out after ${ROAM_DOC_LOAD_TIMEOUT_MS}ms`,
+            )
+          ).raw,
         };
       } catch (error) {
         console.warn("Postep roam document skipped", {

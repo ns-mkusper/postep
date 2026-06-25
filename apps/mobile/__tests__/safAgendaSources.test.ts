@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it, afterEach } from "node:test";
 import { performance } from "node:perf_hooks";
 
-import { listDocumentsForConfig } from "../lib/documentSources";
+import {
+  clearDocumentSourceCache,
+  listDocumentsForConfig,
+  resetDocumentSourceStats,
+} from "../lib/documentSources";
 import {
   completeHabitForConfig,
   loadAgendaSnapshotForConfig,
@@ -31,6 +35,8 @@ const rootUri = "content://com.google.android.apps.docs.storage/document/root";
 const config: OrgBridgeConfig = { roots: [rootUri], roamRoots: [] };
 
 afterEach(() => {
+  clearDocumentSourceCache();
+  resetDocumentSourceStats();
   delete globalThis.__postepContentUri;
 });
 

@@ -41,6 +41,7 @@ import {
   type OrgBlockViewModel,
 } from "../../lib/orgLexicalModel";
 import {
+  clearDocumentSourceCache,
   listDocumentsForConfig,
   loadDocumentForConfig,
   resolveDocumentPath,
@@ -133,6 +134,8 @@ type NotePreview = {
   metadata: NoteMetadata;
   primaryDate?: string | null;
 };
+
+type MeasuredNotePreviews = Awaited<ReturnType<typeof measureAsyncInteraction<NotePreview[]>>>;
 
 type ChecklistItem = {
   id: string;
@@ -996,10 +999,13 @@ export default function LibraryScreen() {
     [],
   );
 
+  const documentsKey = documentsQueryKey(bridgeConfig);
+  const cachedDocuments = queryClient.getQueryData<DocumentRef[]>(documentsKey);
   const documentsQuery = useQuery({
-    queryKey: documentsQueryKey(bridgeConfig),
+    queryKey: documentsKey,
     queryFn: () => listDocumentsForConfig(bridgeConfig),
     enabled: hasConfiguredRoots,
+    initialData: cachedDocuments,
   });
 
   // Open requests arrive as a route param (e.g. from the roam screen). Apply
@@ -1050,12 +1056,15 @@ export default function LibraryScreen() {
     setDocumentDraftRaw("");
   }, [selectedPath]);
 
+  const previewKey = documentPreviewsQueryKey(
+    bridgeConfig,
+    documentsQuery.data?.map((doc) => doc.path),
+  );
+  const cachedPreviews = queryClient.getQueryData<MeasuredNotePreviews>(previewKey);
   const previewsQuery = useQuery({
-    queryKey: documentPreviewsQueryKey(
-      bridgeConfig,
-      documentsQuery.data?.map((doc) => doc.path),
-    ),
+    queryKey: previewKey,
     enabled: !selectedPath && Boolean(documentsQuery.data) && hasConfiguredRoots,
+    initialData: cachedPreviews,
     queryFn: () =>
       measureAsyncInteraction("noteGrid", async () => {
         const documents = documentsQuery.data ?? [];
@@ -1114,9 +1123,12 @@ export default function LibraryScreen() {
     });
   }, [noteGrid.value, searchQuery]);
 
+  const selectedDocumentQueryKey = documentQueryKey(bridgeConfig, selectedPath ?? "");
+  const cachedDocument = queryClient.getQueryData<DocumentPayload>(selectedDocumentQueryKey);
   const documentQuery = useQuery({
-    queryKey: documentQueryKey(bridgeConfig, selectedPath ?? ""),
+    queryKey: selectedDocumentQueryKey,
     enabled: Boolean(selectedPath) && hasConfiguredRoots,
+    initialData: cachedDocument,
     queryFn: () => loadDocumentForConfig(bridgeConfig, selectedPath!),
   });
 
@@ -1170,6 +1182,7 @@ export default function LibraryScreen() {
   }, [lexicalDocument.metric.elapsedMs, noteGrid.metric.elapsedMs, selectedPath]);
 
   const onRefreshDocuments = () => {
+    clearDocumentSourceCache();
     queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] === "documents",
     });
@@ -2185,7 +2198,8 @@ export default function LibraryScreen() {
             ListHeaderComponent={() =>
               hasConfiguredRoots &&
               visibleNotes.length === 0 &&
-              (documentsQuery.isPending || previewsQuery.isPending) ? (
+              ((!documentsQuery.data && documentsQuery.isPending) ||
+                (!previewsQuery.data && previewsQuery.isPending)) ? (
                 <View style={styles.loadingSourceBanner}>
                   <ActivityIndicator color="#AFC0FF" />
                   <Text style={styles.loadingSourceText}>Loading notes…</Text>
@@ -2196,7 +2210,8 @@ export default function LibraryScreen() {
               <View style={styles.emptyDocs}>
                 {hasConfiguredRoots &&
                 visibleNotes.length === 0 &&
-                (documentsQuery.isPending || previewsQuery.isPending) ? null : (
+                ((!documentsQuery.data && documentsQuery.isPending) ||
+                  (!previewsQuery.data && previewsQuery.isPending)) ? null : (
                   <Text style={styles.emptyDocsText}>
                     {searchQuery.trim()
                       ? "No notes match that search."
@@ -2312,12 +2327,7 @@ export default function LibraryScreen() {
               { backgroundColor: editTheme.background },
             ]}
           >
-            {documentQuery.isFetching ? (
-              <ActivityIndicator
-                style={{ marginVertical: 24 }}
-                color="#5F6F85"
-              />
-            ) : documentQuery.data ? (
+            {documentQuery.data ? (
               isEditingDocument ? (
                 <View style={[styles.documentEditLane, { backgroundColor: editTheme.background, borderColor: editTheme.border }]} testID="document-edit-lane">
                   <Text style={[styles.documentEditTitle, { color: editTheme.text }]}>Edit source</Text>
@@ -2354,6 +2364,11 @@ export default function LibraryScreen() {
                   onSelectNode={selectDocumentNode}
                 />
               )
+            ) : documentQuery.isFetching ? (
+              <ActivityIndicator
+                style={{ marginVertical: 24 }}
+                color="#5F6F85"
+              />
             ) : (
               <Text style={styles.emptyDocument}>
                 Select an Org file to view its contents.

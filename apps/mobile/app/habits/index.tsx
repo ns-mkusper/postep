@@ -19,6 +19,7 @@ import {
   deleteHabitForConfig,
   loadAgendaSnapshotForConfig,
 } from "../../lib/agendaSources";
+import { clearDocumentSourceCache } from "../../lib/documentSources";
 import { agendaQueryKey, hasConfiguredOrgRoots } from "../../lib/queryKeys";
 
 function bareHabitTitle(title: string) {
@@ -69,6 +70,7 @@ export default function HabitsScreen() {
   const [pendingHabitKey, setPendingHabitKey] = useState<string | null>(null);
   const hasConfiguredRoots = hasConfiguredOrgRoots(config);
   const agendaKey = agendaQueryKey(config);
+  const cachedAgenda = queryClient.getQueryData<Awaited<ReturnType<typeof loadAgendaSnapshotForConfig>>>(agendaKey);
 
   const agendaQuery = useQuery({
     queryKey: agendaKey,
@@ -77,10 +79,17 @@ export default function HabitsScreen() {
         ? loadAgendaSnapshotForConfig(config)
         : Promise.resolve({ items: [], habits: [] }),
     enabled: hasHydratedConfig,
+    initialData: cachedAgenda,
   });
 
-  useBridgeEvent("agendaChanged", () => agendaQuery.refetch());
-  useBridgeEvent("rootsChanged", () => agendaQuery.refetch());
+  useBridgeEvent("agendaChanged", () => {
+    clearDocumentSourceCache();
+    void agendaQuery.refetch();
+  });
+  useBridgeEvent("rootsChanged", () => {
+    clearDocumentSourceCache();
+    void agendaQuery.refetch();
+  });
 
   const habits = useMemo(
     () => agendaQuery.data?.habits ?? [],

@@ -11,6 +11,86 @@ import {
 
 const LISTING_TARGET_MS = 10000;
 
+type DocumentSourceCacheSnapshot = {
+  documentsByConfig: Array<{ configKey: string; documents: DocumentRef[] }>;
+  payloadsByPath: Array<{ pathKey: string; payload: DocumentPayload }>;
+};
+
+type DocumentSourceStats = {
+  listSourceReads: number;
+  listCacheHits: number;
+  documentSourceReads: number;
+  documentCacheHits: number;
+  documentWrites: number;
+};
+
+const documentListCache = new Map<string, DocumentRef[]>();
+const documentPayloadCache = new Map<string, DocumentPayload>();
+const documentSourceStats: DocumentSourceStats = {
+  listSourceReads: 0,
+  listCacheHits: 0,
+  documentSourceReads: 0,
+  documentCacheHits: 0,
+  documentWrites: 0,
+};
+
+function configCacheKey(config: OrgBridgeConfig): string {
+  return JSON.stringify({
+    roots: dedupeSourceList(config.roots).map(normalizeSourceIdentity).sort(),
+    roamRoots: dedupeSourceList(config.roamRoots ?? []).map(normalizeSourceIdentity).sort(),
+  });
+}
+
+function pathCacheKey(path: string): string {
+  return normalizeSourceIdentity(path);
+}
+
+export function resetDocumentSourceStats(): void {
+  documentSourceStats.listSourceReads = 0;
+  documentSourceStats.listCacheHits = 0;
+  documentSourceStats.documentSourceReads = 0;
+  documentSourceStats.documentCacheHits = 0;
+  documentSourceStats.documentWrites = 0;
+}
+
+export function getDocumentSourceStats(): DocumentSourceStats {
+  return { ...documentSourceStats };
+}
+
+export function clearDocumentSourceCache(): void {
+  documentListCache.clear();
+  documentPayloadCache.clear();
+}
+
+export function snapshotDocumentSourceCache(maxPayloads = Number.POSITIVE_INFINITY): DocumentSourceCacheSnapshot {
+  return {
+    documentsByConfig: [...documentListCache.entries()].map(([configKey, documents]) => ({
+      configKey,
+      documents,
+    })),
+    payloadsByPath: [...documentPayloadCache.entries()].slice(0, maxPayloads).map(([pathKey, payload]) => ({
+      pathKey,
+      payload,
+    })),
+  };
+}
+
+export function hydrateDocumentSourceCache(snapshot?: Partial<DocumentSourceCacheSnapshot> | null): void {
+  if (!snapshot) {
+    return;
+  }
+  for (const entry of snapshot.documentsByConfig ?? []) {
+    documentListCache.set(entry.configKey, entry.documents);
+  }
+  for (const entry of snapshot.payloadsByPath ?? []) {
+    documentPayloadCache.set(entry.pathKey, entry.payload);
+  }
+}
+
+export function cachedDocumentPayloads(): DocumentPayload[] {
+  return [...documentPayloadCache.values()];
+}
+
 export function normalizeSourceIdentity(value: string): string {
   let normalized = value.trim();
   for (let idx = 0; idx < 2; idx += 1) {
@@ -141,6 +221,14 @@ export async function listDocumentsForConfig(
     return [];
   }
 
+  const cacheKey = configCacheKey(config);
+  const cached = documentListCache.get(cacheKey);
+  if (cached) {
+    documentSourceStats.listCacheHits += 1;
+    return cached;
+  }
+
+  documentSourceStats.listSourceReads += 1;
   const { nativeConfig, safRoots, safRoamRoots } = splitConfig(config);
   const documents: DocumentRef[] = [];
 
@@ -173,6 +261,7 @@ export async function listDocumentsForConfig(
   }
 
   const sorted = dedupeDocuments(documents).sort((left, right) => left.name.localeCompare(right.name));
+  documentListCache.set(cacheKey, sorted);
   console.log("Postep document listing", {
     files: sorted.length,
     elapsedMs: Date.now() - startedAt,
@@ -184,26 +273,45 @@ export async function loadDocumentForConfig(
   config: OrgBridgeConfig,
   path: string,
 ): Promise<DocumentPayload> {
-  if (isSafUri(path)) {
-    const { readOrgFile } = await import("@postep/bridge/platform/android/saf");
-    const raw = await readOrgFile(path);
-    return parseOrgDocument(raw, path);
+  const cacheKey = pathCacheKey(path);
+  const cached = documentPayloadCache.get(cacheKey);
+  if (cached) {
+    documentSourceStats.documentCacheHits += 1;
+    return cached;
   }
-  return loadDocumentAsync(splitConfig(config).nativeConfig, path);
+
+  documentSourceStats.documentSourceReads += 1;
+  const payload = isSafUri(path)
+    ? await loadSafDocument(path)
+    : await loadDocumentAsync(splitConfig(config).nativeConfig, path);
+  documentPayloadCache.set(cacheKey, payload);
+  return payload;
+}
+
+async function loadSafDocument(path: string): Promise<DocumentPayload> {
+  const { readOrgFile } = await import("@postep/bridge/platform/android/saf");
+  const raw = await readOrgFile(path);
+  return parseOrgDocument(raw, path);
 }
 
 export async function updateDocumentForConfig(
   request: UpdateDocumentRequest,
 ): Promise<DocumentPayload> {
-  if (isSafUri(request.path)) {
-    const { writeOrgFile } =
-      await import("@postep/bridge/platform/android/saf");
-    await writeOrgFile(request.path, request.raw);
-    return parseOrgDocument(request.raw, request.path);
-  }
-  return updateDocumentAsync({
-    ...request,
-    roots: dedupeSourceList(request.roots).filter((root) => !isSafUri(root)),
-    roamRoots: dedupeSourceList(request.roamRoots ?? []).filter((root) => !isSafUri(root)),
-  });
+  documentSourceStats.documentWrites += 1;
+  const payload = isSafUri(request.path)
+    ? await updateSafDocument(request.path, request.raw)
+    : await updateDocumentAsync({
+        ...request,
+        roots: dedupeSourceList(request.roots).filter((root) => !isSafUri(root)),
+        roamRoots: dedupeSourceList(request.roamRoots ?? []).filter((root) => !isSafUri(root)),
+      });
+  documentPayloadCache.set(pathCacheKey(request.path), payload);
+  return payload;
+}
+
+async function updateSafDocument(path: string, raw: string): Promise<DocumentPayload> {
+  const { writeOrgFile } =
+    await import("@postep/bridge/platform/android/saf");
+  await writeOrgFile(path, raw);
+  return parseOrgDocument(raw, path);
 }
