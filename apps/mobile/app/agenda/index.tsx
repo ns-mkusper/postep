@@ -4,7 +4,6 @@ import {
   Text,
   FlatList,
   StyleSheet,
-  RefreshControl,
   TouchableOpacity,
   Modal,
   Pressable,
@@ -331,12 +330,6 @@ export default function AgendaScreen() {
         style={styles.list}
         data={groups}
         keyExtractor={(item) => item.date}
-        refreshControl={
-          <RefreshControl
-            refreshing={agendaQuery.isRefetching}
-            onRefresh={refreshAgenda}
-          />
-        }
         renderItem={({ item }) => (
           <View style={styles.section}>
             <Text
