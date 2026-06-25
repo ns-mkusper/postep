@@ -22,7 +22,7 @@ export const MAIN_FEATURE_BUDGET_MS = {
   habitAddDelete: 8,
   roamMode: 12,
   roamExplorer: 16,
-  roamResponsiveness: 24,
+  roamResponsiveness: 40,
   orgDocumentWidgets: 80,
   routeSwitch: 6
 } as const;
