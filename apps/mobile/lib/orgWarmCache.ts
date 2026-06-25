@@ -13,6 +13,7 @@ import {
   clearDocumentSourceCache,
   hydrateDocumentSourceCache,
   listDocumentsForConfig,
+  loadDocumentForConfig,
   snapshotDocumentSourceCache,
 } from "./documentSources";
 import { loadRoamGraphForConfig } from "./roamSources";
@@ -35,6 +36,7 @@ const ROAM_FILE = "roam.json";
 const PREVIEWS_FILE = "previews.json";
 const DOCUMENTS_DIR = "documents/";
 const MAX_PERSISTED_DOCUMENTS = 400;
+const WARM_DOCUMENT_LOAD_CONCURRENCY = 8;
 
 export type DocumentCacheMetadata = {
   path: string;
@@ -242,6 +244,21 @@ async function warmOrgWorkspaceOnce(
   // source version and unchanged files avoid React Query/persistent document rewrites.
   clearDocumentSourceCache();
   const documents = await listDocumentsForConfig(config);
+  await mapConcurrent(
+    documents.slice(0, MAX_PERSISTED_DOCUMENTS),
+    WARM_DOCUMENT_LOAD_CONCURRENCY,
+    async (document) => {
+      try {
+        await loadDocumentForConfig(config, document.path);
+      } catch (error) {
+        console.warn("Postep warm document skipped", {
+          name: document.name,
+          path: document.path,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+  );
   const agenda = await loadAgendaSnapshotForConfig(config);
   const roam = await loadRoamGraphForConfig(config);
 
@@ -403,6 +420,24 @@ async function deleteDocumentPayload(key: string): Promise<void> {
 
 async function documentPayloadExists(key: string): Promise<boolean> {
   return await pathExists(`${DOCUMENTS_DIR}${key}.json`);
+}
+
+async function mapConcurrent<T>(
+  items: T[],
+  concurrency: number,
+  task: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        await task(items[index], index);
+      }
+    }),
+  );
 }
 
 function snapshotMetrics(

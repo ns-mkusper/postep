@@ -99,6 +99,8 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
     await expect(page.getByTestId('document-action-menu')).toBeVisible();
   });
   await expect(page.getByTestId('document-action-edit-source')).toBeVisible();
+  await expect(page.getByTestId('document-action-toggle-reader')).toBeVisible();
+  await expect(page.getByTestId('document-action-toggle-outline')).toBeVisible();
   await screenshot(page, '02b-document-overflow-menu');
 
   await page.emulateMedia({ colorScheme: 'dark' });
@@ -114,7 +116,10 @@ test('full launched org UI workflow against 10 E2E org files', async ({ page }) 
     window.getComputedStyle(node).backgroundColor
   );
   expect(editBackground).not.toBe('rgb(255, 255, 255)');
-  for (const chromeTestId of ['document-top-bar', 'document-mode-bar', 'document-bottom-toolbar']) {
+  await expect(page.getByTestId('document-mode-bar')).toHaveCount(0);
+  await expect(page.getByTestId('document-action-toggle-reader')).toHaveCount(0);
+  await expect(page.getByTestId('document-action-toggle-outline')).toHaveCount(0);
+  for (const chromeTestId of ['document-top-bar', 'document-bottom-toolbar']) {
     const chromeBackground = await page.getByTestId(chromeTestId).evaluate((node) =>
       window.getComputedStyle(node).backgroundColor
     );
