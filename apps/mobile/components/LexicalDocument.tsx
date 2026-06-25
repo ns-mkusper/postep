@@ -165,21 +165,34 @@ function renderRichText(node: LexicalProjectionNode, theme: ThemeTokens, readerM
     const todoParts = splitTodo(body, node.todo);
     const allTags = node.tags && node.tags.length > 0 ? node.tags : tags;
     const done = todoParts.todo === "DONE";
+    const todoPlanningVisible =
+      !!todoParts.todo &&
+      !["DONE", "CANCELLED", "CANCELED"].includes(todoParts.todo) &&
+      !!node.planning?.length;
     return (
-      <RNText style={textStyleFor(node, theme)} testID={`document-heading-${node.lineStart ?? 0}`}>
-        {todoParts.todo ? (
-          <RNText style={[styles.todoKeyword, { color: done ? theme.done : theme.todo }]}>
-            {todoParts.todo}{" "}
+      <View testID={`document-heading-${node.lineStart ?? 0}`}>
+        <RNText style={textStyleFor(node, theme)}>
+          {todoParts.todo ? (
+            <RNText style={[styles.todoKeyword, { color: done ? theme.done : theme.todo }]}>
+              {todoParts.todo}{" "}
+            </RNText>
+          ) : null}
+          {node.priority ? (
+            <RNText style={[styles.priorityText, { color: theme.priority }]}>#{node.priority} </RNText>
+          ) : null}
+          {renderInline(todoParts.body, theme, readerMode)}
+          {allTags.length > 0 ? (
+            <RNText style={[styles.tagsText, { color: theme.tag }]}> {allTags.map((tag) => `#${tag}`).join(" ")}</RNText>
+          ) : null}
+        </RNText>
+        {todoPlanningVisible ? (
+          <RNText style={[styles.headingPlanningText, { color: theme.muted }]}>
+            {node.planning
+              ?.map((entry) => `${entry.keyword ? `${entry.keyword}: ` : ""}${entry.text.replace(/[<>]/g, "")}`)
+              .join(" · ")}
           </RNText>
         ) : null}
-        {node.priority ? (
-          <RNText style={[styles.priorityText, { color: theme.priority }]}>#{node.priority} </RNText>
-        ) : null}
-        {renderInline(todoParts.body, theme, readerMode)}
-        {allTags.length > 0 ? (
-          <RNText style={[styles.tagsText, { color: theme.tag }]}> {allTags.map((tag) => `#${tag}`).join(" ")}</RNText>
-        ) : null}
-      </RNText>
+      </View>
     );
   }
 
@@ -450,6 +463,12 @@ const styles = StyleSheet.create({
   planningText: {
     fontSize: 17,
     lineHeight: 23,
+  },
+  headingPlanningText: {
+    fontSize: 14,
+    lineHeight: 18,
+    marginTop: 2,
+    fontWeight: "500",
   },
   planningKeyword: {
     fontWeight: "800",

@@ -9,9 +9,10 @@ import {
 import type { LexicalNode } from '@postep/bridge';
 
 type ProjectionMetadata = { id?: string; lineStart?: number; lineEnd?: number; sourceRaw?: string };
+type HeadingPlanning = { keyword?: string; text: string };
 
 export type LexicalProjectionNode =
-  | (ProjectionMetadata & { type: 'heading'; depth: number; children: Array<{ text: string }>; todo?: string | null; priority?: string | null; tags?: string[] })
+  | (ProjectionMetadata & { type: 'heading'; depth: number; children: Array<{ text: string }>; todo?: string | null; priority?: string | null; tags?: string[]; planning?: HeadingPlanning[] })
   | (ProjectionMetadata & { type: 'list_item'; depth: number; ordered: boolean; checked: boolean | null; children: Array<{ text: string }>; marker?: string })
   | (ProjectionMetadata & { type: 'planning'; keyword?: string; children: Array<{ text: string }> })
   | (ProjectionMetadata & { type: 'property_drawer'; children: Array<{ text: string }>; properties?: Record<string, string> })
@@ -128,11 +129,25 @@ export function lexicalNodesToProjection(
   fallbackRaw: string,
   options: ConversionOptions
 ): LexicalProjectionNode[] {
-  const filtered = options.outlineOnly ? nodes.filter((node) => node.type === 'heading') : nodes;
-  if (filtered.length === 0) {
+  if (options.outlineOnly) {
+    const headings = nodes.filter(isHeadingNode);
+    if (headings.length === 0) {
+      return convertOrgToLexical(fallbackRaw, options);
+    }
+    return headings.flatMap((node) =>
+      lexicalNodeToProjection(node, options).map((projection) =>
+        projection.type === 'heading'
+          ? withHeadingPlanning(projection, planningForHeading(nodes, node))
+          : projection
+      )
+    );
+  }
+
+  if (nodes.length === 0) {
     return convertOrgToLexical(fallbackRaw, options);
   }
-  return filtered.flatMap((node) => lexicalNodeToProjection(node, options));
+
+  return nodes.flatMap((node) => lexicalNodeToProjection(node, options));
 }
 
 export function createBlockViewModels(
@@ -288,6 +303,33 @@ export function convertOrgToLexical(raw: string, options: ConversionOptions): Le
       continue;
     }
 
+    const planningMatch = line.match(/^\s*(SCHEDULED|DEADLINE|CLOSED):\s*(.*)$/i);
+    if (planningMatch) {
+      pushParagraph();
+      const planning = {
+        keyword: planningMatch[1].toUpperCase(),
+        text: planningMatch[2].trim(),
+      };
+      if (options.outlineOnly) {
+        const lastHeading = [...nodes].reverse().find(
+          (node): node is Extract<LexicalProjectionNode, { type: 'heading' }> => node.type === 'heading'
+        );
+        if (lastHeading) {
+          lastHeading.planning = [...(lastHeading.planning ?? []), planning];
+        }
+      } else {
+        nodes.push({
+          type: 'planning',
+          keyword: planning.keyword,
+          sourceRaw: line,
+          lineStart: lineIndex,
+          lineEnd: lineIndex,
+          children: [{ text: planning.text }]
+        } as LexicalProjectionNode);
+      }
+      continue;
+    }
+
     const listMatch = line.match(/^(\s*)([-+]|\d+[.)])\s+(\[[ xX]\]\s+)?(.*)$/);
     if (listMatch && !options.outlineOnly) {
       pushParagraph();
@@ -320,6 +362,39 @@ export function convertOrgToLexical(raw: string, options: ConversionOptions): Le
   }
 
   return nodes;
+}
+
+
+function isHeadingNode(node: LexicalNode): node is Extract<LexicalNode, { type: 'heading' }> {
+  return node.type === 'heading';
+}
+
+function withHeadingPlanning(
+  heading: Extract<LexicalProjectionNode, { type: 'heading' }>,
+  planning: HeadingPlanning[],
+): LexicalProjectionNode {
+  if (planning.length === 0) {
+    return heading;
+  }
+  return { ...heading, planning };
+}
+
+function planningForHeading(nodes: LexicalNode[], heading: Extract<LexicalNode, { type: 'heading' }>): HeadingPlanning[] {
+  const headingIndex = nodes.indexOf(heading);
+  if (headingIndex < 0) {
+    return [];
+  }
+  const planning: HeadingPlanning[] = [];
+  for (let index = headingIndex + 1; index < nodes.length; index += 1) {
+    const node = nodes[index];
+    if (node.type === 'heading') {
+      break;
+    }
+    if (node.type === 'planning') {
+      planning.push({ keyword: node.keyword, text: node.text });
+    }
+  }
+  return planning;
 }
 
 function lexicalNodeToProjection(node: LexicalNode, options: ConversionOptions): LexicalProjectionNode[] {

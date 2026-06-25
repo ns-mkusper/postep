@@ -7,7 +7,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  Switch,
   ActivityIndicator,
   ScrollView,
   TextInput,
@@ -1768,7 +1767,7 @@ export default function LibraryScreen() {
         <View style={styles.documentDialogSection}>
           {renderDialogButton("Edit source", openEditor, "document-action-edit-source")}
           {renderDialogButton(
-            readerMode ? "Reader off" : "Reader on",
+            readerMode ? "Reader mode: On" : "Reader mode: Off",
             () => {
               setReaderMode((value) => !value);
               closeDocumentDialog();
@@ -1776,7 +1775,7 @@ export default function LibraryScreen() {
             "document-action-toggle-reader",
           )}
           {renderDialogButton(
-            outlineOnly ? "Outline off" : "Outline on",
+            outlineOnly ? "Outline mode: On" : "Outline mode: Off",
             () => {
               setOutlineOnly((value) => !value);
               closeDocumentDialog();
@@ -2172,25 +2171,6 @@ export default function LibraryScreen() {
             </TouchableOpacity>
           </View>
 
-          <View
-            style={[
-              styles.documentModeBar,
-              {
-                backgroundColor: editTheme.background,
-                borderBottomColor: editTheme.border,
-              },
-            ]}
-            testID="document-mode-bar"
-          >
-            <View style={styles.switchItem}>
-              <Text style={[styles.switchLabel, { color: editTheme.text }]}>Reader</Text>
-              <Switch value={readerMode} onValueChange={setReaderMode} />
-            </View>
-            <View style={styles.switchItem}>
-              <Text style={[styles.switchLabel, { color: editTheme.text }]}>Outline</Text>
-              <Switch value={outlineOnly} onValueChange={setOutlineOnly} />
-            </View>
-          </View>
 
           <ScrollView
             testID="document-scroll"
@@ -3218,28 +3198,6 @@ const styles = StyleSheet.create({
   editorTitleBlock: { flex: 1, minWidth: 0 },
   editorTitle: { color: "#252832", fontSize: 20, fontWeight: "800" },
   editorSubtitle: { color: "#6B7280", fontSize: 11, marginTop: 2 },
-  switchRow: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#2E3A2B",
-  },
-  switchItem: { flexDirection: "row", alignItems: "center", gap: 8 },
-  switchLabel: { color: "#4B5563", fontSize: 16, fontWeight: "700" },
-  documentModeBar: {
-    minHeight: 54,
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#DADAE4",
-    backgroundColor: "#FAF9FD",
-  },
   actionButton: {
     backgroundColor: "#22301E",
     paddingVertical: 10,
